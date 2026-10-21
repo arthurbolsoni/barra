@@ -30,7 +30,10 @@ fn apertada(vk: VIRTUAL_KEY) -> bool {
 fn tela_cheia_na_frente() -> bool {
     unsafe {
         let fg = GetForegroundWindow();
-        if fg.is_invalid() || IsZoomed(fg).as_bool() || fg.0 as isize == DESTINO.load(Ordering::Relaxed) {
+        // a visão geral também cobre o monitor inteiro: janela da própria barra não conta
+        let mut pid = 0u32;
+        GetWindowThreadProcessId(fg, Some(&mut pid));
+        if fg.is_invalid() || IsZoomed(fg).as_bool() || pid == windows::Win32::System::Threading::GetCurrentProcessId() {
             return false;
         }
         let classe = crate::janelas::classe(fg);
@@ -86,12 +89,19 @@ unsafe extern "system" fn gancho(code: i32, wp: WPARAM, lp: LPARAM) -> LRESULT {
     CallNextHookEx(None, code, wp, lp)
 }
 
+/// Instala o gancho numa linha de execução só dele. No laço da barra ele atrasava enquanto a
+/// visão geral abria (miniaturas, pintura da tela inteira); passando do tempo limite, o Windows
+/// pula o gancho e o Tab vai para o Alt+Tab nativo.
 pub fn instalar(destino: HWND) {
     DESTINO.store(destino.0 as isize, Ordering::Relaxed);
-    unsafe {
+    std::thread::spawn(|| unsafe {
         let inst = windows::Win32::System::LibraryLoader::GetModuleHandleW(None).unwrap_or_default();
-        _ = SetWindowsHookExW(WH_KEYBOARD_LL, Some(gancho), Some(inst.into()), 0);
-    }
+        let Ok(_g) = SetWindowsHookExW(WH_KEYBOARD_LL, Some(gancho), Some(inst.into()), 0) else { return };
+        let mut msg = MSG::default();
+        while GetMessageW(&mut msg, None, 0, 0).as_bool() {
+            DispatchMessageW(&msg);
+        }
+    });
 }
 
 /// Aperta e solta uma tecla sem uso (0xE8) enquanto o Win ou o Alt ainda está apertado:
