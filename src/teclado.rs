@@ -21,6 +21,8 @@ pub static DESTINO: AtomicIsize = AtomicIsize::new(0);
 /// Visão geral aberta (ou para abrir) pelo Alt+Tab: soltar o Alt escolhe.
 pub static MODO_ALT: AtomicBool = AtomicBool::new(false);
 pub static ALT_TAB: AtomicBool = AtomicBool::new(true);
+/// Só para teste (BARRA_TESTE=1): aceita teclas simuladas por SendInput.
+static ACEITA_SIMULADA: AtomicBool = AtomicBool::new(false);
 
 fn apertada(vk: VIRTUAL_KEY) -> bool {
     unsafe { GetAsyncKeyState(vk.0 as i32) as u16 & 0x8000 != 0 }
@@ -57,7 +59,7 @@ fn postar(msg: u32, wp: usize) {
 unsafe extern "system" fn gancho(code: i32, wp: WPARAM, lp: LPARAM) -> LRESULT {
     if code == HC_ACTION as i32 {
         let k = &*(lp.0 as *const KBDLLHOOKSTRUCT);
-        let injetada = k.flags.0 & LLKHF_INJECTED.0 != 0;
+        let injetada = k.flags.0 & LLKHF_INJECTED.0 != 0 && !ACEITA_SIMULADA.load(Ordering::Relaxed);
         let desce = wp.0 as u32 == WM_KEYDOWN || wp.0 as u32 == WM_SYSKEYDOWN;
         let vk = VIRTUAL_KEY(k.vkCode as u16);
         if !injetada {
@@ -94,6 +96,7 @@ unsafe extern "system" fn gancho(code: i32, wp: WPARAM, lp: LPARAM) -> LRESULT {
 /// pula o gancho e o Tab vai para o Alt+Tab nativo.
 pub fn instalar(destino: HWND) {
     DESTINO.store(destino.0 as isize, Ordering::Relaxed);
+    ACEITA_SIMULADA.store(std::env::var_os("BARRA_TESTE").is_some(), Ordering::Relaxed);
     std::thread::spawn(|| unsafe {
         let inst = windows::Win32::System::LibraryLoader::GetModuleHandleW(None).unwrap_or_default();
         let Ok(_g) = SetWindowsHookExW(WH_KEYBOARD_LL, Some(gancho), Some(inst.into()), 0) else { return };
