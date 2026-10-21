@@ -126,6 +126,8 @@ impl Visao {
         let pad = 40.0 * s;
         let vao = 28.0 * s;
         let cab = 44.0 * s;
+        // faixa no pé do cartão para as minimizadas (a miniatura do DWM cobriria o que estiver embaixo dela)
+        let pe = 36.0 * s;
         let (aw, ah) = (w - 2.0 * pad, h - topo - pad);
 
         // quantas colunas deixam as miniaturas maiores
@@ -133,7 +135,7 @@ impl Visao {
         for cols in 1..=n {
             let linhas = n.div_ceil(cols);
             let cw = (aw - vao * (cols - 1) as f32) / cols as f32;
-            let ch = (ah - vao * (linhas - 1) as f32) / linhas as f32 - cab;
+            let ch = (ah - vao * (linhas - 1) as f32) / linhas as f32 - cab - pe;
             let k = (cw / mw).min(ch / mh);
             if k > melhor.1 {
                 melhor = (cols, k);
@@ -142,7 +144,7 @@ impl Visao {
         let (cols, k) = melhor;
         let linhas = n.div_ceil(cols);
         let cw = mw * k;
-        let ch = mh * k + cab;
+        let ch = mh * k + cab + pe;
         let total_w = cw * cols as f32 + vao * (cols - 1) as f32;
         let total_h = ch * linhas as f32 + vao * (linhas - 1) as f32;
         let x0 = (w - total_w) / 2.0;
@@ -155,7 +157,7 @@ impl Visao {
             let y = y0 + l as f32 * (ch + vao);
             let r = ret(x, y, x + cw, y + ch);
             let cab_r = ret(x, y, x + cw, y + cab);
-            let area = ret(x + 8.0 * s, y + cab, x + cw - 8.0 * s, y + ch - 8.0 * s);
+            let area = ret(x + 8.0 * s, y + cab, x + cw - 8.0 * s, y + ch - pe);
             let grupo = (i < grupos.lista.len()).then_some(i);
             if let Some(g) = grupo {
                 let ka = (area.right - area.left) / mw;
@@ -164,15 +166,15 @@ impl Visao {
                 // do fundo para a frente
                 js.sort_by_key(|h| std::cmp::Reverse(z.get(h).copied().unwrap_or(usize::MAX)));
                 let mut minimizadas = 0;
+                let n_min = js.iter().filter(|&&h| unsafe { IsIconic(hwnd(h)).as_bool() }).count().max(1);
                 for h in js {
                     let (rj, min) = onde(h);
                     if min {
-                        // minimizadas: fila de cartõezinhos no pé da tela do grupo
+                        // minimizadas: fila de cartõezinhos na faixa do pé
                         let alt = 26.0 * s;
-                        let larg = ((area.right - area.left) / 3.0).min(200.0 * s);
-                        let por_linha = (((area.right - area.left) / (larg + 4.0 * s)) as usize).max(1);
-                        let cx = area.left + 4.0 * s + (minimizadas % por_linha) as f32 * (larg + 4.0 * s);
-                        let cy = area.bottom - 4.0 * s - alt - (minimizadas / por_linha) as f32 * (alt + 4.0 * s);
+                        let larg = ((area.right - area.left - 4.0 * s * (n_min - 1) as f32) / n_min as f32).min(220.0 * s);
+                        let cx = area.left + minimizadas as f32 * (larg + 4.0 * s);
+                        let cy = area.bottom + (pe - alt) / 2.0;
                         minimizadas += 1;
                         self.itens.push(Item { hwnd: h, grupo: g, r: ret(cx, cy, cx + larg, cy + alt), origem: RECT::default(), minimizada: true });
                         continue;
