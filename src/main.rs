@@ -382,7 +382,18 @@ fn novo_grupo_na_visao(st: &mut Estado) {
     redesenhar(st);
 }
 
-/// Apaga o grupo da seleção (janela ou quadro); as janelas dele vão para o grupo anterior.fn apagar_grupo_escolhido(st: &mut Estado) {    let porjanela = st.visao.selecao.and_then(|j| st.grupos.grupo_de(j));    let g = porjanela.or_else(|| st.visao.cartao_sel.and_then(|c| st.visao.cartoes.get(c)).and_then(|c| c.grupo));    if let Some(g) = g {        st.grupos.apagar(g);        st.visao.cartao_sel = None;        remontar_visao(st);        redesenhar(st);    }}
+/// Apaga o grupo da seleção (janela ou quadro); as janelas dele vão para o grupo anterior.
+fn apagar_grupo_escolhido(st: &mut Estado) {
+    let porjanela = st.visao.selecao.and_then(|j| st.grupos.grupo_de(j));
+    let g = porjanela.or_else(|| st.visao.cartao_sel.and_then(|c| st.visao.cartoes.get(c)).and_then(|c| c.grupo));
+    if let Some(g) = g {
+        st.grupos.apagar(g);
+        st.visao.cartao_sel = None;
+        remontar_visao(st);
+        redesenhar(st);
+    }
+}
+
 /// Setas no Win+Tab: vai para o vizinho mais perto naquela direção, entre as janelas que
 /// casam com o filtro, os grupos vazios e o "novo grupo".
 fn navegar(st: &mut Estado, dx: f32, dy: f32) {
