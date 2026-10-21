@@ -1,7 +1,8 @@
-//! Desenho da barra com Direct2D, num DC (o da janela ou um bitmap, no modo --preview).
+//! Desenho da barra, da dica e da visão geral com Direct2D, num DC (o da janela ou um bitmap,
+//! no modo --preview). Visual do Omarchy: faixa fina em cima, texto e glifos em JetBrainsMono
+//! Nerd Font, cores do tema escolhido, cantos retos e bordas de 2 px como as do Hyprland.
 
 use std::collections::HashMap;
-use std::ffi::c_void;
 
 use windows::core::{w, Result, PCWSTR};
 use windows::Win32::Foundation::*;
@@ -12,8 +13,16 @@ use windows::Win32::Graphics::Dxgi::Common::*;
 use windows::Win32::Graphics::Gdi::HDC;
 use windows::Win32::Graphics::Imaging::*;
 use windows::Win32::System::Com::{CoCreateInstance, CLSCTX_INPROC_SERVER};
-use windows::Win32::System::Registry::{RegGetValueW, HKEY_CURRENT_USER, RRF_RT_REG_DWORD};
 use windows::Win32::UI::WindowsAndMessaging::HICON;
+
+use crate::tema::Tema;
+
+const FONTE: PCWSTR = w!("JetBrainsMono Nerd Font");
+
+// glifos da Nerd Font
+const G_MAIS: &str = "\u{f067}";
+const G_WIFI: &str = "\u{f05a9}";
+const G_VOLUME: &str = "\u{f057e}";
 
 /// O que fica embaixo do cursor.
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -34,7 +43,6 @@ pub struct ItemGrupo {
 
 pub struct ItemJanela {
     pub hwnd: isize,
-    pub titulo: String,
     pub icone: HICON,
     pub ativa: bool,
     pub minimizada: bool,
@@ -57,13 +65,13 @@ pub struct Cena {
     pub grupos: Vec<ItemGrupo>,
     pub janelas: Vec<ItemJanela>,
     pub hover: Option<Alvo>,
+    /// "terça-feira 20:25", no centro
     pub hora: String,
-    pub data: String,
     pub bandeja: Vec<ItemBandeja>,
 }
 
-/// Visão geral: um cartão por grupo, com as janelas no lugar delas. As miniaturas são do
-/// DWM e ficam por cima deste desenho; aqui vão fundo, nomes, contornos e as minimizadas.
+/// Visão geral: um quadro por grupo, com as janelas no lugar delas. As miniaturas são do
+/// DWM e ficam por cima deste desenho; aqui vão fundo, nomes, bordas e as minimizadas.
 pub struct CartaoV {
     pub r: D2D_RECT_F,
     pub cab: D2D_RECT_F,
@@ -71,7 +79,7 @@ pub struct CartaoV {
     pub nome: String,
     pub qtd: usize,
     pub ativo: bool,
-    /// Cartão "+ Novo grupo".
+    /// Cartão "novo grupo".
     pub novo: bool,
     pub hover: bool,
     /// Janela sendo arrastada por cima.
@@ -100,42 +108,17 @@ pub struct CenaVisao {
 
 pub type Alvos = Vec<(D2D_RECT_F, Alvo)>;
 
-fn rgba(r: f32, g: f32, b: f32, a: f32) -> D2D1_COLOR_F {
-    D2D1_COLOR_F { r, g, b, a }
-}
-
-fn branco(a: f32) -> D2D1_COLOR_F {
-    rgba(1.0, 1.0, 1.0, a)
+fn cor(hex: u32, a: f32) -> D2D1_COLOR_F {
+    D2D1_COLOR_F {
+        r: ((hex >> 16) & 0xFF) as f32 / 255.0,
+        g: ((hex >> 8) & 0xFF) as f32 / 255.0,
+        b: (hex & 0xFF) as f32 / 255.0,
+        a,
+    }
 }
 
 fn ret(left: f32, top: f32, right: f32, bottom: f32) -> D2D_RECT_F {
     D2D_RECT_F { left, top, right, bottom }
-}
-
-/// Cor de destaque do Windows; se for escura demais para ler sobre a barra, branco.
-fn destaque() -> D2D1_COLOR_F {
-    let mut v = 0u32;
-    let mut tam = 4u32;
-    let ok = unsafe {
-        RegGetValueW(
-            HKEY_CURRENT_USER,
-            w!("Software\\Microsoft\\Windows\\CurrentVersion\\Explorer\\Accent"),
-            w!("AccentColorMenu"),
-            RRF_RT_REG_DWORD,
-            None,
-            Some(&mut v as *mut _ as *mut c_void),
-            Some(&mut tam),
-        )
-    };
-    if ok.is_ok() {
-        let r = (v & 0xFF) as f32 / 255.0;
-        let g = ((v >> 8) & 0xFF) as f32 / 255.0;
-        let b = ((v >> 16) & 0xFF) as f32 / 255.0;
-        if 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.35 {
-            return rgba(r, g, b, 1.0);
-        }
-    }
-    branco(1.0)
 }
 
 pub struct Gfx {
@@ -144,25 +127,17 @@ pub struct Gfx {
     wic: IWICImagingFactory,
     rt: ID2D1DCRenderTarget,
     icones: HashMap<isize, ID2D1Bitmap>,
-    destaque: D2D1_COLOR_F,
-}
-
-struct Fontes {
-    texto: IDWriteTextFormat,
-    grupo: IDWriteTextFormat,
-    qtd: IDWriteTextFormat,
-    hora: IDWriteTextFormat,
-    simbolo: IDWriteTextFormat,
+    pub tema: &'static Tema,
 }
 
 impl Gfx {
-    pub fn new() -> Result<Self> {
+    pub fn new(tema: &'static Tema) -> Result<Self> {
         unsafe {
             let d2d: ID2D1Factory = D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, None)?;
             let dw: IDWriteFactory = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED)?;
             let wic: IWICImagingFactory = CoCreateInstance(&CLSID_WICImagingFactory, None, CLSCTX_INPROC_SERVER)?;
             let rt = Self::alvo(&d2d)?;
-            Ok(Self { d2d, dw, wic, rt, icones: HashMap::new(), destaque: destaque() })
+            Ok(Self { d2d, dw, wic, rt, icones: HashMap::new(), tema })
         }
     }
 
@@ -180,17 +155,13 @@ impl Gfx {
         }
     }
 
-    pub fn atualizar_destaque(&mut self) {
-        self.destaque = destaque();
-    }
-
     fn pincel(&self, c: D2D1_COLOR_F) -> Result<ID2D1SolidColorBrush> {
         unsafe { self.rt.CreateSolidColorBrush(&c, None) }
     }
 
-    fn formato(&self, fonte: PCWSTR, tam: f32, peso: DWRITE_FONT_WEIGHT, alinhar: DWRITE_TEXT_ALIGNMENT) -> Result<IDWriteTextFormat> {
+    fn formato(&self, tam: f32, peso: DWRITE_FONT_WEIGHT, alinhar: DWRITE_TEXT_ALIGNMENT) -> Result<IDWriteTextFormat> {
         unsafe {
-            let f = self.dw.CreateTextFormat(fonte, None, peso, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, tam, w!("pt-br"))?;
+            let f = self.dw.CreateTextFormat(FONTE, None, peso, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, tam, w!("pt-br"))?;
             f.SetTextAlignment(alinhar)?;
             f.SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER)?;
             f.SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP)?;
@@ -200,17 +171,6 @@ impl Gfx {
             f.SetTrimming(&corte, &reticencias)?;
             Ok(f)
         }
-    }
-
-    fn fontes(&self, s: f32) -> Result<Fontes> {
-        let ui = w!("Segoe UI Variable Text");
-        Ok(Fontes {
-            texto: self.formato(ui, 12.5 * s, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_TEXT_ALIGNMENT_LEADING)?,
-            grupo: self.formato(ui, 13.0 * s, DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_TEXT_ALIGNMENT_LEADING)?,
-            qtd: self.formato(ui, 11.0 * s, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_TEXT_ALIGNMENT_LEADING)?,
-            hora: self.formato(ui, 12.0 * s, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_TEXT_ALIGNMENT_CENTER)?,
-            simbolo: self.formato(w!("Segoe Fluent Icons"), 15.0 * s, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_TEXT_ALIGNMENT_CENTER)?,
-        })
     }
 
     fn texto(&self, s: &str, f: &IDWriteTextFormat, r: D2D_RECT_F, c: D2D1_COLOR_F) -> Result<()> {
@@ -230,9 +190,15 @@ impl Gfx {
         }
     }
 
-    fn caixa(&self, r: D2D_RECT_F, raio: f32, c: D2D1_COLOR_F) -> Result<()> {
-        let rr = D2D1_ROUNDED_RECT { rect: r, radiusX: raio, radiusY: raio };
-        unsafe { self.rt.FillRoundedRectangle(&rr, &self.pincel(c)?) };
+    fn preencher(&self, r: D2D_RECT_F, c: D2D1_COLOR_F) -> Result<()> {
+        unsafe { self.rt.FillRectangle(&r, &self.pincel(c)?) };
+        Ok(())
+    }
+
+    /// Borda de `e` px por dentro de `r`.
+    fn borda(&self, r: D2D_RECT_F, c: D2D1_COLOR_F, e: f32) -> Result<()> {
+        let m = e / 2.0;
+        unsafe { self.rt.DrawRectangle(&ret(r.left + m, r.top + m, r.right - m, r.bottom - m), &self.pincel(c)?, e, None) };
         Ok(())
     }
 
@@ -257,6 +223,12 @@ impl Gfx {
         Some(b)
     }
 
+    fn icone(&mut self, ic: HICON, r: D2D_RECT_F, opac: f32) {
+        if let Some(b) = self.bitmap(ic) {
+            unsafe { self.rt.DrawBitmap(&b, Some(&r), opac, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR, None) };
+        }
+    }
+
     fn no_dc<R>(&mut self, dc: HDC, w: i32, h: i32, f: impl FnOnce(&mut Self) -> Result<R>) -> Result<R> {
         unsafe {
             self.rt.BindDC(dc, &RECT { left: 0, top: 0, right: w, bottom: h })?;
@@ -275,26 +247,144 @@ impl Gfx {
         r
     }
 
-    /// Desenha a cena no DC e devolve onde ficou cada alvo clicável.
+    /// Desenha a barra no DC e devolve onde ficou cada alvo clicável.
     pub fn desenhar(&mut self, dc: HDC, cena: &Cena) -> Result<Alvos> {
         self.no_dc(dc, cena.w, cena.h, |g| g.conteudo(cena))
     }
 
+    fn conteudo(&mut self, c: &Cena) -> Result<Alvos> {
+        let t = self.tema;
+        let s = c.escala;
+        let (w, h) = (c.w as f32, c.h as f32);
+        let f_texto = self.formato(12.0 * s, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_TEXT_ALIGNMENT_CENTER)?;
+        let f_ativo = self.formato(12.0 * s, DWRITE_FONT_WEIGHT_BOLD, DWRITE_TEXT_ALIGNMENT_CENTER)?;
+        let f_glifo = self.formato(14.0 * s, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_TEXT_ALIGNMENT_CENTER)?;
+        let mut alvos: Alvos = Vec::new();
+        let hover = |a: Alvo| c.hover == Some(a);
+        let realce = cor(t.fundo_claro, 1.0);
+
+        unsafe { self.rt.Clear(Some(&cor(t.fundo, 1.0))) };
+
+        // grupos, como os workspaces da Waybar: só o nome; ativo no destaque, vazio apagado
+        let mut x = 6.0 * s;
+        for (i, g) in c.grupos.iter().enumerate() {
+            let fonte = if g.ativo { &f_ativo } else { &f_texto };
+            let larg = self.largura(&g.nome, fonte)?.max(7.0 * s) + 14.0 * s;
+            let r = ret(x, 0.0, x + larg, h);
+            if hover(Alvo::Grupo(i)) && !g.ativo {
+                self.preencher(r, realce)?;
+            }
+            let tinta = if g.ativo {
+                cor(t.destaque, 1.0)
+            } else if g.qtd == 0 {
+                cor(t.texto_escuro, 1.0)
+            } else {
+                cor(t.texto, 1.0)
+            };
+            self.texto(&g.nome, fonte, r, tinta)?;
+            alvos.push((r, Alvo::Grupo(i)));
+            x = r.right;
+        }
+        let r = ret(x, 0.0, x + 24.0 * s, h);
+        if hover(Alvo::NovoGrupo) {
+            self.preencher(r, realce)?;
+        }
+        self.texto(G_MAIS, &f_texto, r, cor(t.texto_escuro, 1.0))?;
+        alvos.push((r, Alvo::NovoGrupo));
+        x = r.right + 14.0 * s;
+
+        // janelas do grupo: só ícones; a com foco ganha a linha do destaque embaixo
+        let lado = 16.0 * s;
+        let celula = 28.0 * s;
+        let meio = h / 2.0;
+        for j in &c.janelas {
+            let r = ret(x, 0.0, x + celula, h);
+            if j.piscando {
+                self.preencher(r, cor(t.amarelo, 0.28))?;
+            } else if hover(Alvo::Janela(j.hwnd)) {
+                self.preencher(r, realce)?;
+            }
+            let cx = (r.left + r.right) / 2.0;
+            let ri = ret(cx - lado / 2.0, meio - lado / 2.0, cx + lado / 2.0, meio + lado / 2.0);
+            self.icone(j.icone, ri, if j.minimizada { 0.4 } else { 1.0 });
+            if !j.selo.is_invalid() {
+                let l = 9.0 * s;
+                self.icone(j.selo, ret(ri.right - l * 0.6, ri.bottom - l * 0.7, ri.right + l * 0.4, ri.bottom + l * 0.3), 1.0);
+            }
+            if j.ativa {
+                self.preencher(ret(r.left + 4.0 * s, h - 2.0 * s, r.right - 4.0 * s, h), cor(t.destaque, 1.0))?;
+            } else if j.piscando {
+                self.preencher(ret(r.left + 4.0 * s, h - 2.0 * s, r.right - 4.0 * s, h), cor(t.amarelo, 1.0))?;
+            }
+            // progresso (download, cópia): linha no alto da célula
+            if let Some((estado, fracao)) = j.progresso {
+                let tinta = match estado {
+                    4 => t.vermelho,
+                    8 => t.amarelo,
+                    _ => t.verde,
+                };
+                let fr = if estado == 1 { 1.0 } else { fracao };
+                let a = if estado == 1 { 0.5 } else { 1.0 };
+                let (l, rr) = (r.left + 4.0 * s, r.right - 4.0 * s);
+                self.preencher(ret(l, 0.0, rr, 2.0 * s), cor(t.selecao, 1.0))?;
+                self.preencher(ret(l, 0.0, l + (rr - l) * fr, 2.0 * s), cor(tinta, a))?;
+            }
+            alvos.push((r, Alvo::Janela(j.hwnd)));
+            x = r.right;
+        }
+        let fim_esquerda = x;
+
+        // direita: rede e volume, e antes deles a bandeja dos outros programas
+        let rs = ret(w - 6.0 * s - 56.0 * s, 0.0, w - 6.0 * s, h);
+        if hover(Alvo::Sistema) {
+            self.preencher(rs, realce)?;
+        }
+        let ms = (rs.left + rs.right) / 2.0;
+        self.texto(G_WIFI, &f_glifo, ret(rs.left, 0.0, ms, h), cor(t.texto, 1.0))?;
+        self.texto(G_VOLUME, &f_glifo, ret(ms, 0.0, rs.right, h), cor(t.texto, 1.0))?;
+        alvos.push((rs, Alvo::Sistema));
+        let mut xb = rs.left - 6.0 * s;
+        for ic in c.bandeja.iter().rev() {
+            let r = ret(xb - 24.0 * s, 0.0, xb, h);
+            if hover(Alvo::Bandeja(ic.indice)) {
+                self.preencher(r, realce)?;
+            }
+            let cx = (r.left + r.right) / 2.0;
+            let l = 15.0 * s;
+            self.icone(ic.icone, ret(cx - l / 2.0, meio - l / 2.0, cx + l / 2.0, meio + l / 2.0), 1.0);
+            alvos.push((r, Alvo::Bandeja(ic.indice)));
+            xb = r.left;
+        }
+
+        // centro: dia e hora (some se as janelas chegarem até ele)
+        let lh = self.largura(&c.hora, &f_texto)? + 16.0 * s;
+        let rh = ret(w / 2.0 - lh / 2.0, 0.0, w / 2.0 + lh / 2.0, h);
+        if rh.left > fim_esquerda && rh.right < xb {
+            if hover(Alvo::Relogio) {
+                self.preencher(rh, realce)?;
+            }
+            self.texto(&c.hora, &f_texto, rh, cor(t.texto, 1.0))?;
+            alvos.push((rh, Alvo::Relogio));
+        }
+        Ok(alvos)
+    }
+
     /// Tamanho da dica (tooltip) para o texto.
     pub fn medir_dica(&self, texto: &str, s: f32) -> (i32, i32) {
-        let Ok(f) = self.formato(w!("Segoe UI Variable Text"), 12.0 * s, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_TEXT_ALIGNMENT_CENTER) else {
+        let Ok(f) = self.formato(12.0 * s, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_TEXT_ALIGNMENT_CENTER) else {
             return (0, 0);
         };
-        let l = self.largura(texto, &f).unwrap_or(0.0).min(600.0 * s);
-        ((l + 20.0 * s).ceil() as i32, (28.0 * s).ceil() as i32)
+        let l = self.largura(texto, &f).unwrap_or(0.0).min(640.0 * s);
+        ((l + 22.0 * s).ceil() as i32, (26.0 * s).ceil() as i32)
     }
 
     pub fn desenhar_dica(&mut self, dc: HDC, w: i32, h: i32, texto: &str, s: f32) -> Result<()> {
-        self.no_dc(dc, w, h, |g| unsafe {
-            g.rt.Clear(Some(&rgba(0.17, 0.17, 0.18, 1.0)));
-            g.rt.DrawRectangle(&ret(0.5, 0.5, w as f32 - 0.5, h as f32 - 0.5), &g.pincel(branco(0.14))?, 1.0, None);
-            let f = g.formato(w!("Segoe UI Variable Text"), 12.0 * s, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_TEXT_ALIGNMENT_CENTER)?;
-            g.texto(texto, &f, ret(6.0 * s, 0.0, w as f32 - 6.0 * s, h as f32), branco(0.95))
+        self.no_dc(dc, w, h, |g| {
+            let t = g.tema;
+            unsafe { g.rt.Clear(Some(&cor(t.fundo, 1.0))) };
+            g.borda(ret(0.0, 0.0, w as f32, h as f32), cor(t.destaque, 1.0), 1.0 * s)?;
+            let f = g.formato(12.0 * s, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_TEXT_ALIGNMENT_CENTER)?;
+            g.texto(texto, &f, ret(8.0 * s, 0.0, w as f32 - 8.0 * s, h as f32), cor(t.texto, 1.0))
         })
     }
 
@@ -302,241 +392,73 @@ impl Gfx {
         self.no_dc(dc, c.w, c.h, |g| g.conteudo_visao(c))
     }
 
-    fn contorno(&self, r: D2D_RECT_F, raio: f32, cor: D2D1_COLOR_F, espessura: f32) -> Result<()> {
-        let m = espessura / 2.0;
-        let rr = D2D1_ROUNDED_RECT { rect: ret(r.left + m, r.top + m, r.right - m, r.bottom - m), radiusX: raio, radiusY: raio };
-        unsafe { self.rt.DrawRoundedRectangle(&rr, &self.pincel(cor)?, espessura, None) };
-        Ok(())
-    }
-
     fn conteudo_visao(&mut self, c: &CenaVisao) -> Result<()> {
+        let t = self.tema;
         let s = c.escala;
-        let acc = self.destaque;
-        let ui = w!("Segoe UI Variable Text");
-        let f_dica = self.formato(ui, 15.0 * s, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_TEXT_ALIGNMENT_CENTER)?;
-        let f_titulo = self.formato(w!("Segoe UI Variable Display"), 20.0 * s, DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_TEXT_ALIGNMENT_CENTER)?;
-        let f_nome = self.formato(ui, 16.0 * s, DWRITE_FONT_WEIGHT_SEMI_BOLD, DWRITE_TEXT_ALIGNMENT_LEADING)?;
-        let f_qtd = self.formato(ui, 13.0 * s, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_TEXT_ALIGNMENT_TRAILING)?;
-        let f_min = self.formato(ui, 12.0 * s, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_TEXT_ALIGNMENT_LEADING)?;
-        let f_novo = self.formato(ui, 16.0 * s, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_TEXT_ALIGNMENT_CENTER)?;
-        let (w, _) = (c.w as f32, c.h as f32);
+        let w = c.w as f32;
+        let f_titulo = self.formato(15.0 * s, DWRITE_FONT_WEIGHT_BOLD, DWRITE_TEXT_ALIGNMENT_CENTER)?;
+        let f_dica = self.formato(12.0 * s, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_TEXT_ALIGNMENT_CENTER)?;
+        let f_nome = self.formato(13.0 * s, DWRITE_FONT_WEIGHT_BOLD, DWRITE_TEXT_ALIGNMENT_LEADING)?;
+        let f_qtd = self.formato(12.0 * s, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_TEXT_ALIGNMENT_TRAILING)?;
+        let f_min = self.formato(11.0 * s, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_TEXT_ALIGNMENT_LEADING)?;
+        let f_novo = self.formato(13.0 * s, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_TEXT_ALIGNMENT_CENTER)?;
 
-        unsafe { self.rt.Clear(Some(&rgba(0.045, 0.045, 0.05, 1.0))) };
+        unsafe { self.rt.Clear(Some(&cor(t.fundo, 1.0))) };
 
-        // topo: janela escolhida e como usar / filtro
-        self.texto(&c.titulo, &f_titulo, ret(40.0 * s, 14.0 * s, w - 40.0 * s, 46.0 * s), branco(0.95))?;
-        let dica = if c.filtro.is_empty() {
-            "digite para filtrar  ·  Enter ou clique abre  ·  arraste uma janela para outro grupo  ·  duplo clique no nome renomeia  ·  Esc fecha".to_string()
+        // topo: a janela escolhida e, embaixo, como usar ou o filtro
+        self.texto(&c.titulo, &f_titulo, ret(40.0 * s, 12.0 * s, w - 40.0 * s, 38.0 * s), cor(t.texto_forte, 1.0))?;
+        let (dica, tinta) = if c.filtro.is_empty() {
+            ("digite para filtrar · enter abre · arraste para outro grupo · duplo clique renomeia · esc fecha".to_string(), t.texto_escuro)
         } else {
-            format!("filtro: {}", c.filtro)
+            (format!("filtro: {}", c.filtro), t.destaque)
         };
-        let tinta = if c.filtro.is_empty() { branco(0.45) } else { acc };
-        self.texto(&dica, &f_dica, ret(40.0 * s, 48.0 * s, w - 40.0 * s, 74.0 * s), tinta)?;
+        self.texto(&dica, &f_dica, ret(40.0 * s, 38.0 * s, w - 40.0 * s, 58.0 * s), cor(tinta, 1.0))?;
 
-        let raio = 12.0 * s;
+        let e = 2.0 * s;
         for k in &c.cartoes {
-            self.caixa(k.r, raio, branco(if k.hover || k.destino { 0.075 } else { 0.045 }))?;
-            if k.novo {
-                let cor = if k.destino { acc } else { branco(0.5) };
-                self.texto("\u{E710}", &self.formato(w!("Segoe Fluent Icons"), 28.0 * s, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_TEXT_ALIGNMENT_CENTER)?,
-                    ret(k.r.left, (k.r.top + k.r.bottom) / 2.0 - 40.0 * s, k.r.right, (k.r.top + k.r.bottom) / 2.0), cor)?;
-                self.texto("Novo grupo", &f_novo, ret(k.r.left, (k.r.top + k.r.bottom) / 2.0, k.r.right, (k.r.top + k.r.bottom) / 2.0 + 30.0 * s), cor)?;
-            } else {
-                // tela do grupo, onde as janelas aparecem
-                self.caixa(k.area, 6.0 * s, rgba(0.0, 0.0, 0.0, 0.45))?;
-                let pad = 14.0 * s;
-                let tinta = if k.ativo { branco(1.0) } else { branco(0.8) };
-                self.texto(&k.nome, &f_nome, ret(k.cab.left + pad, k.cab.top, k.cab.right - 90.0 * s, k.cab.bottom), tinta)?;
-                let qtd = if k.qtd == 1 { "1 janela".to_string() } else { format!("{} janelas", k.qtd) };
-                self.texto(&qtd, &f_qtd, ret(k.cab.right - 120.0 * s, k.cab.top, k.cab.right - pad, k.cab.bottom), branco(0.45))?;
-            }
-            if k.destino {
-                self.contorno(k.r, raio, acc, 2.5 * s)?;
+            let borda = if k.destino {
+                t.amarelo
             } else if k.ativo {
-                self.contorno(k.r, raio, branco(0.7), 1.5 * s)?;
+                t.destaque
+            } else if k.hover {
+                t.texto_escuro
+            } else {
+                t.mudo
+            };
+            if k.novo {
+                self.borda(k.r, cor(borda, 1.0), e)?;
+                self.texto(&format!("{G_MAIS}  novo grupo"), &f_novo, k.r, cor(if k.destino { t.amarelo } else { t.texto_escuro }, 1.0))?;
+                continue;
             }
+            self.preencher(k.area, cor(t.fundo_claro, 1.0))?;
+            self.borda(k.r, cor(borda, 1.0), e)?;
+            let pad = 12.0 * s;
+            let nome = if k.ativo { t.destaque } else { t.texto };
+            self.texto(&k.nome, &f_nome, ret(k.cab.left + pad, k.cab.top, k.cab.right - 110.0 * s, k.cab.bottom), cor(nome, 1.0))?;
+            let qtd = if k.qtd == 1 { "1 janela".to_string() } else { format!("{} janelas", k.qtd) };
+            self.texto(&qtd, &f_qtd, ret(k.cab.right - 140.0 * s, k.cab.top, k.cab.right - pad, k.cab.bottom), cor(t.texto_escuro, 1.0))?;
         }
 
         for j in &c.janelas {
+            let a = if j.apagada { 0.3 } else { 1.0 };
             if j.minimizada {
-                // sem miniatura: cartãozinho com ícone e título
-                let a = if j.apagada { 0.25 } else { 1.0 };
-                self.caixa(j.r, 5.0 * s, branco(0.08 * a))?;
-                let lado = (18.0 * s).min(j.r.bottom - j.r.top - 4.0 * s);
-                let ri = ret(j.r.left + 8.0 * s, (j.r.top + j.r.bottom - lado) / 2.0, j.r.left + 8.0 * s + lado, (j.r.top + j.r.bottom + lado) / 2.0);
-                if let Some(b) = self.bitmap(j.icone) {
-                    unsafe { self.rt.DrawBitmap(&b, Some(&ri), 0.8 * a, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR, None) };
-                }
-                self.texto(&j.titulo, &f_min, ret(ri.right + 6.0 * s, j.r.top, j.r.right - 6.0 * s, j.r.bottom), branco(0.6 * a))?;
+                // sem miniatura: ícone e título numa faixa
+                self.preencher(j.r, cor(t.selecao, a))?;
+                let lado = (14.0 * s).min(j.r.bottom - j.r.top - 4.0 * s);
+                let ri = ret(j.r.left + 7.0 * s, (j.r.top + j.r.bottom - lado) / 2.0, j.r.left + 7.0 * s + lado, (j.r.top + j.r.bottom + lado) / 2.0);
+                self.icone(j.icone, ri, 0.8 * a);
+                self.texto(&j.titulo, &f_min, ret(ri.right + 6.0 * s, j.r.top, j.r.right - 6.0 * s, j.r.bottom), cor(t.texto_escuro, a))?;
             }
-            // contorno por fora: a miniatura cobre o lado de dentro
-            let fora = |m: f32| ret(j.r.left - m, j.r.top - m, j.r.right + m, j.r.bottom + m);
-            if j.selecionada {
-                self.contorno(fora(4.0 * s), 6.0 * s, acc, 3.0 * s)?;
+            // borda por fora, como a do Hyprland: a miniatura cobre o lado de dentro
+            let (tinta, m) = if j.selecionada {
+                (cor(t.destaque, 1.0), 2.0 * s)
             } else if j.hover {
-                self.contorno(fora(3.0 * s), 5.0 * s, branco(0.55), 2.0 * s)?;
-            }
+                (cor(t.texto, 1.0), 2.0 * s)
+            } else {
+                (cor(t.mudo, a), 1.0 * s)
+            };
+            self.borda(ret(j.r.left - m, j.r.top - m, j.r.right + m, j.r.bottom + m), tinta, m)?;
         }
         Ok(())
-    }
-
-    fn conteudo(&mut self, c: &Cena) -> Result<Alvos> {
-        let s = c.escala;
-        let (w, h) = (c.w as f32, c.h as f32);
-        let f = self.fontes(s)?;
-        let acc = self.destaque;
-        let mut alvos: Alvos = Vec::new();
-        let hover = |a: Alvo| c.hover == Some(a);
-
-        unsafe {
-            self.rt.Clear(Some(&rgba(0.085, 0.085, 0.09, 1.0)));
-            self.rt.FillRectangle(&ret(0.0, 0.0, w, 1.0 * s), &self.pincel(branco(0.07))?);
-        }
-
-        let topo = 4.0 * s;
-        let base = h - 4.0 * s;
-        let alt = base - topo;
-        let raio = 6.0 * s;
-        let mut x = 6.0 * s;
-
-        // grupos: nome e quantidade de janelas
-        for (i, g) in c.grupos.iter().enumerate() {
-            let qtd = g.qtd.to_string();
-            let wn = self.largura(&g.nome, &f.grupo)?;
-            let wq = self.largura(&qtd, &f.qtd)?;
-            let pad = 11.0 * s;
-            let r = ret(x, topo, x + pad + wn + 6.0 * s + wq + pad, base);
-            if g.ativo {
-                self.caixa(r, raio, branco(0.11))?;
-                let meio = (r.left + r.right) / 2.0;
-                self.caixa(ret(meio - 9.0 * s, base - 3.0 * s, meio + 9.0 * s, base), 1.5 * s, acc)?;
-            } else if hover(Alvo::Grupo(i)) {
-                self.caixa(r, raio, branco(0.06))?;
-            }
-            let tinta = if g.ativo { branco(1.0) } else { branco(0.62) };
-            self.texto(&g.nome, &f.grupo, ret(r.left + pad, topo, r.left + pad + wn + 1.0, base - 1.0 * s), tinta)?;
-            let xq = r.left + pad + wn + 6.0 * s;
-            self.texto(&qtd, &f.qtd, ret(xq, topo, xq + wq + 1.0, base - 1.0 * s), branco(if g.ativo { 0.55 } else { 0.38 }))?;
-            alvos.push((r, Alvo::Grupo(i)));
-            x = r.right + 2.0 * s;
-        }
-        let r = ret(x, topo, x + alt * 0.8, base);
-        if hover(Alvo::NovoGrupo) {
-            self.caixa(r, raio, branco(0.06))?;
-        }
-        self.texto("\u{E710}", &f.simbolo, ret(r.left, topo, r.right, base), branco(0.55))?;
-        alvos.push((r, Alvo::NovoGrupo));
-        x = r.right + 8.0 * s;
-        unsafe {
-            self.rt.FillRectangle(&ret(x, 11.0 * s, x + 1.0 * s, h - 11.0 * s), &self.pincel(branco(0.12))?);
-        }
-        x += 9.0 * s;
-
-        // direita: relógio e configurações rápidas
-        let largura_hora = 82.0 * s;
-        let rh = ret(w - 6.0 * s - largura_hora, topo, w - 6.0 * s, base);
-        let largura_sis = 64.0 * s;
-        let rs = ret(rh.left - 2.0 * s - largura_sis, topo, rh.left - 2.0 * s, base);
-        if hover(Alvo::Relogio) {
-            self.caixa(rh, raio, branco(0.07))?;
-        }
-        let meio = (topo + base) / 2.0;
-        self.texto(&c.hora, &f.hora, ret(rh.left, meio - 16.0 * s, rh.right, meio), branco(0.95))?;
-        self.texto(&c.data, &f.hora, ret(rh.left, meio, rh.right, meio + 16.0 * s), branco(0.95))?;
-        alvos.push((rh, Alvo::Relogio));
-        if hover(Alvo::Sistema) {
-            self.caixa(rs, raio, branco(0.07))?;
-        }
-        let ms = (rs.left + rs.right) / 2.0;
-        self.texto("\u{E701}", &f.simbolo, ret(rs.left, topo, ms + 2.0 * s, base), branco(0.9))?;
-        self.texto("\u{E767}", &f.simbolo, ret(ms - 2.0 * s, topo, rs.right, base), branco(0.9))?;
-        alvos.push((rs, Alvo::Sistema));
-
-        // bandeja: ícones dos outros programas, da direita para a esquerda
-        let passo = 26.0 * s;
-        let lado_b = 16.0 * s;
-        let mut xb = rs.left - 4.0 * s;
-        for (i, ic) in c.bandeja.iter().enumerate().rev() {
-            let r = ret(xb - passo, topo, xb, base);
-            if hover(Alvo::Bandeja(ic.indice)) {
-                self.caixa(r, raio, branco(0.07))?;
-            }
-            let cx = (r.left + r.right) / 2.0;
-            if let Some(b) = self.bitmap(ic.icone) {
-                let ri = ret(cx - lado_b / 2.0, meio - lado_b / 2.0, cx + lado_b / 2.0, meio + lado_b / 2.0);
-                unsafe { self.rt.DrawBitmap(&b, Some(&ri), 1.0, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR, None) };
-            }
-            alvos.push((r, Alvo::Bandeja(ic.indice)));
-            xb = r.left;
-            let _ = i;
-        }
-        let area_bandeja = ret(xb, 0.0, rs.left, h);
-
-        // janelas do grupo ativo
-        let fim = area_bandeja.left - 10.0 * s;
-        let n = c.janelas.len();
-        if n > 0 {
-            let ideal = 196.0 * s;
-            let cabe = ((fim - x) / n as f32 - 2.0 * s).min(ideal).max(alt);
-            for j in &c.janelas {
-                if x + cabe > fim + 0.5 {
-                    break;
-                }
-                let r = ret(x, topo, x + cabe, base);
-                let fundo = if j.piscando {
-                    Some(rgba(0.95, 0.62, 0.15, 0.38))
-                } else if j.ativa {
-                    Some(branco(0.11))
-                } else if hover(Alvo::Janela(j.hwnd)) {
-                    Some(branco(0.06))
-                } else {
-                    None
-                };
-                if let Some(cor) = fundo {
-                    self.caixa(r, raio, cor)?;
-                }
-                let lado = 20.0 * s;
-                let so_icone = cabe < 92.0 * s;
-                let xi = if so_icone { (r.left + r.right - lado) / 2.0 } else { r.left + 10.0 * s };
-                let ri = ret(xi, meio - lado / 2.0, xi + lado, meio + lado / 2.0);
-                if let Some(b) = self.bitmap(j.icone) {
-                    let opac = if j.minimizada { 0.6 } else { 1.0 };
-                    unsafe { self.rt.DrawBitmap(&b, Some(&ri), opac, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR, None) };
-                }
-                // selo do programa (mensagens não lidas etc.) no canto do ícone
-                if let Some(b) = self.bitmap(j.selo) {
-                    let l = 11.0 * s;
-                    let rs = ret(ri.right - l * 0.7, ri.bottom - l * 0.8, ri.right + l * 0.3, ri.bottom + l * 0.2);
-                    unsafe { self.rt.DrawBitmap(&b, Some(&rs), 1.0, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR, None) };
-                }
-                if !so_icone {
-                    let tinta = if j.ativa { branco(1.0) } else if j.minimizada { branco(0.5) } else { branco(0.82) };
-                    self.texto(&j.titulo, &f.texto, ret(ri.right + 8.0 * s, topo, r.right - 8.0 * s, base - 1.0 * s), tinta)?;
-                }
-                // progresso (download, cópia): faixa no pé do botão
-                if let Some((estado, fracao)) = j.progresso {
-                    let cor = match estado {
-                        4 => rgba(0.93, 0.33, 0.31, 1.0),
-                        8 => rgba(0.98, 0.78, 0.25, 1.0),
-                        _ => rgba(0.36, 0.80, 0.45, 1.0),
-                    };
-                    let faixa = ret(r.left + 4.0 * s, base - 6.0 * s, r.right - 4.0 * s, base - 4.0 * s);
-                    self.caixa(faixa, 1.0 * s, branco(0.10))?;
-                    let fr = if estado == 1 { 1.0 } else { fracao };
-                    let cor = if estado == 1 { D2D1_COLOR_F { a: 0.45, ..cor } } else { cor };
-                    if fr > 0.0 {
-                        let cheio = ret(faixa.left, faixa.top, faixa.left + (faixa.right - faixa.left) * fr, faixa.bottom);
-                        self.caixa(cheio, 1.0 * s, cor)?;
-                    }
-                }
-                // marca embaixo: comprida na ativa, curta nas outras
-                let meio_x = (r.left + r.right) / 2.0;
-                let (meia, cor) = if j.ativa { (8.0 * s, acc) } else { (3.0 * s, branco(0.38)) };
-                self.caixa(ret(meio_x - meia, base - 3.0 * s, meio_x + meia, base), 1.5 * s, cor)?;
-                alvos.push((r, Alvo::Janela(j.hwnd)));
-                x = r.right + 2.0 * s;
-            }
-        }
-        Ok(alvos)
     }
 }

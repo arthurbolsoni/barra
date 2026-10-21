@@ -6,6 +6,7 @@ mod desenho;
 mod grupos;
 mod janelas;
 mod sistema;
+mod tema;
 mod teclado;
 mod visao;
 
@@ -31,13 +32,20 @@ use janelas::hwnd;
 use teclado::{forcar_primeiro_plano, MODO_ALT};
 
 /// Altura da barra a 100% de escala.
-const ALTURA: f32 = 40.0;
+const ALTURA: f32 = 26.0;
+/// Preferência: índice do tema do Omarchy.
+const PREF_TEMA: PCWSTR = w!("Tema");
 const CLASSE: PCWSTR = w!("BarraTarefas");
 const TITULO: PCWSTR = w!("barra");
 const WM_APPBAR: u32 = WM_APP + 1;
 const WM_PRIMEIRO_PLANO: u32 = WM_APP + 2;
 const WM_RENOMEAR: u32 = WM_APP + 3;
 const TIMER: usize = 1;
+const DIAS: [&str; 7] = ["domingo", "segunda-feira", "terça-feira", "quarta-feira", "quinta-feira", "sexta-feira", "sábado"];
+const MESES: [&str; 12] = [
+    "janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro",
+];
+const MENU_TEMA: usize = 200;
 const TIMER_ALT: usize = 2;
 const WM_MOUSELEAVE: u32 = 0x02A3;
 /// Preferência: Alt+Tab abre a visão geral (padrão: sim).
@@ -165,7 +173,6 @@ fn cena(st: &mut Estado, w: i32, h: i32) -> Cena {
             let p = bandeja::progresso(j);
             ItemJanela {
                 hwnd: j,
-                titulo: janelas::titulo(hwnd(j)),
                 icone: icone_de(st, j),
                 ativa: j == fg,
                 minimizada: unsafe { IsIconic(hwnd(j)).as_bool() },
@@ -183,8 +190,7 @@ fn cena(st: &mut Estado, w: i32, h: i32) -> Cena {
         grupos,
         janelas,
         hover: st.hover,
-        hora: format!("{:02}:{:02}", t.wHour, t.wMinute),
-        data: format!("{:02}/{:02}/{}", t.wDay, t.wMonth, t.wYear),
+        hora: format!("{} {:02}:{:02}", DIAS[t.wDayOfWeek as usize % 7], t.wHour, t.wMinute),
         bandeja: bandeja::visiveis().into_iter().map(|(indice, icone, _)| ItemBandeja { indice, icone }).collect(),
     }
 }
@@ -252,6 +258,15 @@ fn mostrar_dica(st: &mut Estado) {
     let texto = match st.hover {
         Some(Alvo::Bandeja(i)) => bandeja::visiveis().into_iter().find(|(n, _, _)| *n == i).map(|(_, _, d)| d).unwrap_or_default(),
         Some(Alvo::Janela(h)) => janelas::titulo(hwnd(h)),
+        Some(Alvo::Relogio) => {
+            let t = unsafe { GetLocalTime() };
+            format!("{}, {} de {} de {}", DIAS[t.wDayOfWeek as usize % 7], t.wDay, MESES[(t.wMonth as usize + 11) % 12], t.wYear)
+        }
+        Some(Alvo::Grupo(i)) => st.grupos.lista.get(i).map(|g| match g.janelas.len() {
+            0 => format!("{}: vazio", g.nome),
+            1 => format!("{}: 1 janela", g.nome),
+            n => format!("{}: {n} janelas", g.nome),
+        }).unwrap_or_default(),
         _ => String::new(),
     };
     let r = st.hover.and_then(|a| st.alvos.iter().find(|(_, b)| *b == a).map(|(r, _)| *r));
@@ -265,7 +280,7 @@ fn mostrar_dica(st: &mut Estado) {
     unsafe { _ = GetWindowRect(st.barra, &mut b) };
     let m = appbar::monitor();
     let x = (b.left + ((r.left + r.right) / 2.0) as i32 - w / 2).clamp(m.left + 4, m.right - w - 4);
-    let y = b.top - h - (6.0 * st.escala) as i32;
+    let y = b.bottom + (6.0 * st.escala) as i32;
     st.dica_texto = texto;
     unsafe {
         _ = SetWindowPos(st.dica, Some(HWND_TOPMOST), x, y, w, h, SWP_NOACTIVATE | SWP_SHOWWINDOW);
@@ -497,7 +512,7 @@ fn mostrar_menu(dono: HWND, m: HMENU, pt: POINT, acima: bool) -> usize {
 fn ponto_da_barra(barra: HWND) -> POINT {
     let mut r = RECT::default();
     unsafe { _ = GetWindowRect(barra, &mut r) };
-    POINT { x: cursor().x, y: r.top }
+    POINT { x: cursor().x, y: r.bottom }
 }
 
 const MENU_NOVO_GRUPO_COM: usize = 2;
@@ -557,7 +572,7 @@ fn clicar_direito(alvo: Option<Alvo>) {
 
     match alvo {
         Some(Alvo::Bandeja(i)) => bandeja::clicar(i, bandeja::Botao::Direito, cursor()),
-        Some(Alvo::Grupo(i)) => menu_grupo(dono, i, pt, true),
+        Some(Alvo::Grupo(i)) => menu_grupo(dono, i, pt, false),
         Some(Alvo::Janela(h)) => unsafe {
             let Ok(m) = CreatePopupMenu() else { return };
             let outros: Vec<Item> = nomes
@@ -572,7 +587,7 @@ fn clicar_direito(alvo: Option<Alvo>) {
             _ = AppendMenuW(m, MF_STRING, MENU_NOVO_GRUPO_COM, w!("Novo grupo com esta janela"));
             _ = AppendMenuW(m, MF_SEPARATOR, 0, None);
             _ = AppendMenuW(m, MF_STRING, MENU_FECHAR, w!("Fechar janela"));
-            match mostrar_menu(dono, m, pt, true) {
+            match mostrar_menu(dono, m, pt, false) {
                 MENU_FECHAR => _ = PostMessageW(Some(hwnd(h)), WM_CLOSE, WPARAM(0), LPARAM(0)),
                 MENU_NOVO_GRUPO_COM => _ = com(|st| {
                     let i = st.grupos.novo();
@@ -600,8 +615,21 @@ fn clicar_direito(alvo: Option<Alvo>) {
             ]) else {
                 return;
             };
-            match mostrar_menu(dono, m, pt, true) {
+            // submenu com os temas do Omarchy, logo depois da visão geral
+            let atual = com(|st| st.gfx.tema.nome).unwrap_or("");
+            let temas: Vec<Item> = tema::TEMAS.iter().enumerate().map(|(i, t)| (MENU_TEMA + i, t.nome.to_string(), t.nome == atual, true)).collect();
+            if let Some(sub) = montar_menu(&temas) {
+                unsafe { _ = InsertMenuW(m, 1, MF_BYPOSITION | MF_POPUP, sub.0 as usize, w!("Tema")) };
+            }
+            match mostrar_menu(dono, m, pt, false) {
                 MENU_VISAO => abrir_visao(false, None),
+                i if (MENU_TEMA..MENU_TEMA + tema::TEMAS.len()).contains(&i) => {
+                    sistema::gravar(PREF_TEMA, Some((i - MENU_TEMA) as u32));
+                    _ = com(|st| {
+                        st.gfx.tema = tema::por_indice((i - MENU_TEMA) as u32);
+                        redesenhar(st);
+                    });
+                }
                 MENU_ESCONDER => {
                     let ligar = !esconder;
                     sistema::gravar(sistema::PREF_ESCONDER, Some(ligar as u32));
@@ -908,7 +936,6 @@ unsafe fn proc_barra(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
         }
         WM_SETTINGCHANGE => {
             _ = com(|st| {
-                st.gfx.atualizar_destaque();
                 redesenhar(st);
             });
             DefWindowProcW(h, msg, wp, lp)
@@ -1076,7 +1103,9 @@ unsafe fn proc_visao(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
             LRESULT(0)
         }
         WM_CHAR => {
-            if let Some(c) = char::from_u32(wp.0 as u32).filter(|c| !c.is_control()) {
+            // a tecla de máscara (0xE8) do Alt/Win+Tab e espaços no começo não entram no filtro
+            let vazio = com(|st| st.visao.filtro.is_empty()).unwrap_or(true);
+            if let Some(c) = char::from_u32(wp.0 as u32).filter(|c| !c.is_control() && !(vazio && c.is_whitespace()) && (*c as u32) < 0xE000) {
                 _ = com(|st| {
                     st.visao.filtro.push(c);
                     st.visao.aplicar_miniaturas();
@@ -1187,7 +1216,7 @@ fn main() -> Result<()> {
                 dica,
                 dica_texto: String::new(),
                 visao_hwnd,
-                gfx: desenho::Gfx::new().expect("Direct2D"),
+                gfx: desenho::Gfx::new(tema::por_indice(sistema::ler(PREF_TEMA).unwrap_or(0))).expect("Direct2D"),
                 grupos,
                 visao: visao::Visao { janela: visao_hwnd, ..Default::default() },
                 mru: atuais,
@@ -1241,11 +1270,11 @@ fn main() -> Result<()> {
 /// `barra --preview <arquivo.bmp>`: desenha uma barra de exemplo num BMP, sem abrir nada na tela.
 fn preview(saida: &str) -> Result<()> {
     let (w, h) = (2560, ALTURA as i32);
-    let mut gfx = desenho::Gfx::new()?;
+    let tema_i = std::env::args().nth(3).and_then(|n| tema::TEMAS.iter().position(|t| t.nome == n)).unwrap_or(0);
+    let mut gfx = desenho::Gfx::new(&tema::TEMAS[tema_i])?;
     let icone = unsafe { LoadIconW(None, IDI_APPLICATION)? };
     let janela = |t: &str, ativa: bool, minimizada: bool, piscando: bool, progresso: Option<(u32, f32)>| ItemJanela {
         hwnd: t.len() as isize,
-        titulo: t.into(),
         icone,
         ativa,
         minimizada,
@@ -1258,16 +1287,15 @@ fn preview(saida: &str) -> Result<()> {
         w,
         h,
         escala: 1.0,
-        grupos: vec![grupo("1", 3, false), grupo("projeto-a", 4, true), grupo("claude", 6, false), grupo("geral", 2, false)],
+        grupos: vec![grupo("1", 3, false), grupo("2", 4, true), grupo("3", 6, false), grupo("4", 0, false), grupo("geral", 2, false)],
         janelas: vec![
             janela("pwsh — projeto-a\\build", true, false, false, None),
             janela("pwsh — testes", false, false, false, Some((2, 0.6))),
             janela("GitHub — snap-zones e mais um título comprido", false, false, true, None),
             janela("Docs", false, true, false, None),
         ],
-        hover: Some(Alvo::Grupo(2)),
-        hora: "14:32".into(),
-        data: "21/10/2026".into(),
+        hover: Some(Alvo::Grupo(4)),
+        hora: "terça-feira 20:25".into(),
         bandeja: (0..4).map(|i| ItemBandeja { indice: i, icone }).collect(),
     };
     unsafe {

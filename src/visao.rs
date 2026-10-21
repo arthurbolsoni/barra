@@ -122,12 +122,12 @@ impl Visao {
         let mw = (monitor.right - monitor.left) as f32;
         let mh = (monitor.bottom - monitor.top) as f32;
         let n = grupos.lista.len() + 1;
-        let topo = 90.0 * s;
-        let pad = 40.0 * s;
-        let vao = 28.0 * s;
-        let cab = 44.0 * s;
+        let topo = 70.0 * s;
+        let pad = 20.0 * s;
+        let vao = 10.0 * s;
+        let cab = 32.0 * s;
         // faixa no pé do cartão para as minimizadas (a miniatura do DWM cobriria o que estiver embaixo dela)
-        let pe = 36.0 * s;
+        let pe = 30.0 * s;
         let (aw, ah) = (w - 2.0 * pad, h - topo - pad);
 
         // quantas colunas deixam as miniaturas maiores
@@ -157,7 +157,7 @@ impl Visao {
             let y = y0 + l as f32 * (ch + vao);
             let r = ret(x, y, x + cw, y + ch);
             let cab_r = ret(x, y, x + cw, y + cab);
-            let area = ret(x + 8.0 * s, y + cab, x + cw - 8.0 * s, y + ch - pe);
+            let area = ret(x + 10.0 * s, y + cab, x + cw - 10.0 * s, y + ch - pe);
             let grupo = (i < grupos.lista.len()).then_some(i);
             if let Some(g) = grupo {
                 let ka = (area.right - area.left) / mw;
@@ -171,7 +171,7 @@ impl Visao {
                     let (rj, min) = onde(h);
                     if min {
                         // minimizadas: fila de cartõezinhos na faixa do pé
-                        let alt = 26.0 * s;
+                        let alt = 22.0 * s;
                         let larg = ((area.right - area.left - 4.0 * s * (n_min - 1) as f32) / n_min as f32).min(220.0 * s);
                         let cx = area.left + minimizadas as f32 * (larg + 4.0 * s);
                         let cy = area.bottom + (pe - alt) / 2.0;

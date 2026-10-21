@@ -31,16 +31,16 @@ pub fn monitor() -> RECT {
     }
 }
 
-/// Pede a faixa de baixo do monitor principal com `altura` px e põe a janela nela.
+/// Pede a faixa de cima do monitor principal com `altura` px e põe a janela nela.
 pub fn posicionar(h: HWND, altura: i32) -> RECT {
     let m = monitor();
     let mut abd = dados(h);
-    abd.uEdge = ABE_BOTTOM;
-    abd.rc = RECT { left: m.left, right: m.right, top: m.bottom - altura, bottom: m.bottom };
+    abd.uEdge = ABE_TOP;
+    abd.rc = RECT { left: m.left, right: m.right, top: m.top, bottom: m.top + altura };
     unsafe {
         SHAppBarMessage(ABM_QUERYPOS, &mut abd);
-        // o Windows pode ter subido a faixa (outra barra embaixo); a altura é a nossa
-        abd.rc.top = abd.rc.bottom - altura;
+        // o Windows pode ter descido a faixa (outra barra em cima); a altura é a nossa
+        abd.rc.bottom = abd.rc.top + altura;
         SHAppBarMessage(ABM_SETPOS, &mut abd);
         let r = abd.rc;
         _ = SetWindowPos(h, Some(HWND_TOPMOST), r.left, r.top, r.right - r.left, r.bottom - r.top, SWP_NOACTIVATE);
