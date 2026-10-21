@@ -294,7 +294,12 @@ fn remontar_visao(st: &mut Estado) {
     let m = appbar::monitor();
     let mut c = RECT::default();
     unsafe { _ = GetClientRect(st.visao_hwnd, &mut c) };
-    st.visao.montar(&st.grupos, m, c.right as f32, c.bottom as f32, st.escala);
+    if st.visao.lista {
+        let mru = st.mru.clone();
+        st.visao.montar_lista(&st.grupos, &mru, m, c.right as f32, c.bottom as f32, st.escala);
+    } else {
+        st.visao.montar(&st.grupos, m, c.right as f32, c.bottom as f32, st.escala);
+    }
     invalidar(st.visao_hwnd);
 }
 
@@ -306,6 +311,7 @@ fn abrir_visao(modo_alt: bool, selecao: Option<isize>) {
         st.visao.anterior = primeiro_plano();
         st.visao.aberta = true;
         st.visao.filtro.clear();
+        st.visao.lista = modo_alt;
         st.visao.arrasto = None;
         st.visao.selecao = selecao.or_else(|| st.mru.first().copied());
         let m = appbar::monitor();
@@ -396,9 +402,9 @@ fn cena_visao(st: &mut Estado, w: i32, h: i32) -> CenaVisao {
             }
         })
         .collect();
-    let itens: Vec<_> = st.visao.itens.iter().enumerate().map(|(i, it)| (it.hwnd, it.r, it.minimizada, st.visao.hover == Some(i))).collect();
+    let itens: Vec<_> = st.visao.itens.iter().enumerate().map(|(i, it)| (it.hwnd, it.r, it.minimizada, st.visao.hover == Some(i), it.rotulo, it.grupo)).collect();
     let mut janelas_v = Vec::new();
-    for (j, r, minimizada, hover) in itens {
+    for (j, r, minimizada, hover, rotulo, g) in itens {
         janelas_v.push(JanelaV {
             r,
             titulo: janelas::titulo(hwnd(j)),
@@ -407,10 +413,12 @@ fn cena_visao(st: &mut Estado, w: i32, h: i32) -> CenaVisao {
             selecionada: st.visao.selecao == Some(j),
             hover,
             apagada: !st.visao.casa(j),
+            rotulo,
+            grupo: st.grupos.lista.get(g).map(|x| x.nome.clone()).unwrap_or_default(),
         });
     }
     let titulo = st.visao.selecao.map(|s| janelas::titulo(hwnd(s))).unwrap_or_default();
-    CenaVisao { w, h, escala: st.escala, cartoes, janelas: janelas_v, filtro: st.visao.filtro.clone(), titulo }
+    CenaVisao { w, h, escala: st.escala, cartoes, janelas: janelas_v, filtro: st.visao.filtro.clone(), titulo, lista: st.visao.lista }
 }
 
 fn comecar_renomear(g: usize) {
@@ -1011,7 +1019,8 @@ unsafe fn proc_visao(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
             let (x, y) = xy(lp);
             _ = SetCapture(h);
             _ = com(|st| {
-                st.visao.arrasto = st.visao.item_em(x as f32, y as f32).map(|item| visao::Arrasto { item, inicio: (x, y), atual: (x, y), ativo: false });
+                // no Alt+Tab não tem arrastar entre grupos: clique só escolhe
+                st.visao.arrasto = st.visao.item_em(x as f32, y as f32).filter(|_| !st.visao.lista).map(|item| visao::Arrasto { item, inicio: (x, y), atual: (x, y), ativo: false });
             });
             LRESULT(0)
         }
@@ -1042,6 +1051,11 @@ unsafe fn proc_visao(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                         let it = &st.visao.itens[a.item];
                         Acao::Ir(it.grupo, Some(it.hwnd))
                     }
+                    // Alt+Tab: clique numa janela vai para ela
+                    None if st.visao.lista => match st.visao.item_em(fx, fy) {
+                        Some(i) => Acao::Ir(st.visao.itens[i].grupo, Some(st.visao.itens[i].hwnd)),
+                        None => Acao::Nada,
+                    },
                     None => match cartao {
                         Some(Some(g)) => Acao::Ir(g, None),
                         Some(None) => Acao::NovoEIr,
@@ -1055,12 +1069,12 @@ unsafe fn proc_visao(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                     fechar_visao(false);
                     ir(g, j);
                 }
-                Acao::NovoEIr => {
-                    fechar_visao(false);
-                    if let Some(g) = com(|st| st.grupos.novo()) {
-                        ir(g, None);
-                    }
-                }
+                // cria o grupo vazio e fica na visão geral, para arrastar janelas para ele
+                Acao::NovoEIr => _ = com(|st| {
+                    st.grupos.novo();
+                    remontar_visao(st);
+                    redesenhar(st);
+                }),
                 Acao::Nada => {}
             }
             LRESULT(0)

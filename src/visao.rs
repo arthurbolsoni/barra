@@ -27,6 +27,8 @@ pub struct Item {
     /// Parte da janela que aparece (coordenadas da janela), para a miniatura.
     pub origem: RECT,
     pub minimizada: bool,
+    /// Alt+Tab: faixa do nome embaixo do quadro.
+    pub rotulo: Option<D2D_RECT_F>,
 }
 
 pub struct Arrasto {
@@ -55,6 +57,8 @@ pub struct Visao {
     pub assinatura: Vec<(usize, isize, bool)>,
     /// Renomeando: (grupo, caixa de texto).
     pub editando: Option<(usize, HWND)>,
+    /// Aberta pelo Alt+Tab: todas as janelas lado a lado, sem sobreposição.
+    pub lista: bool,
 }
 
 fn ret(left: f32, top: f32, right: f32, bottom: f32) -> D2D_RECT_F {
@@ -121,17 +125,14 @@ impl Visao {
 
         let mw = (monitor.right - monitor.left) as f32;
         let mh = (monitor.bottom - monitor.top) as f32;
-        let n = grupos.lista.len();
-        // gaps do Hyprland: 10 por fora, 5 entre os quadros
+        let n = grupos.lista.len() + 1;
         let topo = 70.0 * s;
-        let pad = 10.0 * s;
-        let vao = 5.0 * s;
+        let pad = 20.0 * s;
+        let vao = 10.0 * s;
         let cab = 32.0 * s;
         // faixa no pé do cartão para as minimizadas (a miniatura do DWM cobriria o que estiver embaixo dela)
         let pe = 30.0 * s;
-        // "novo grupo" é uma faixa estreita na direita, não um quadro inteiro
-        let faixa_novo = 56.0 * s;
-        let (aw, ah) = (w - 2.0 * pad - faixa_novo - vao, h - topo - pad);
+        let (aw, ah) = (w - 2.0 * pad, h - topo - pad);
 
         // quantas colunas deixam as miniaturas maiores
         let mut melhor = (1usize, 0.0f32);
@@ -150,11 +151,8 @@ impl Visao {
         let ch = mh * k + cab + pe;
         let total_w = cw * cols as f32 + vao * (cols - 1) as f32;
         let total_h = ch * linhas as f32 + vao * (linhas - 1) as f32;
-        let x0 = pad + ((w - 2.0 * pad) - (total_w + vao + faixa_novo)) / 2.0;
+        let x0 = (w - total_w) / 2.0;
         let y0 = topo + (ah - total_h) / 2.0;
-        // faixa colada no último quadro, com o mesmo gap de dentro
-        let xn = x0 + total_w + vao;
-        let r_novo = ret(xn, y0, xn + faixa_novo, y0 + total_h);
 
         let z = ordem_z();
         for i in 0..n {
@@ -163,8 +161,8 @@ impl Visao {
             let y = y0 + l as f32 * (ch + vao);
             let r = ret(x, y, x + cw, y + ch);
             let cab_r = ret(x, y, x + cw, y + cab);
-            let area = ret(x + 5.0 * s, y + cab, x + cw - 5.0 * s, y + ch - pe);
-            let grupo = Some(i);
+            let area = ret(x + 10.0 * s, y + cab, x + cw - 10.0 * s, y + ch - pe);
+            let grupo = (i < grupos.lista.len()).then_some(i);
             if let Some(g) = grupo {
                 let ka = (area.right - area.left) / mw;
                 let ka = ka.min((area.bottom - area.top) / mh);
@@ -182,7 +180,7 @@ impl Visao {
                         let cx = area.left + minimizadas as f32 * (larg + 4.0 * s);
                         let cy = area.bottom + (pe - alt) / 2.0;
                         minimizadas += 1;
-                        self.itens.push(Item { hwnd: h, grupo: g, r: ret(cx, cy, cx + larg, cy + alt), origem: RECT::default(), minimizada: true });
+                        self.itens.push(Item { hwnd: h, grupo: g, r: ret(cx, cy, cx + larg, cy + alt), origem: RECT::default(), minimizada: true, rotulo: None });
                         continue;
                     }
                     // só a parte que cabe no monitor
@@ -203,13 +201,98 @@ impl Visao {
                         area.left + m(v.right, monitor.left),
                         area.top + m(v.bottom, monitor.top),
                     );
-                    self.itens.push(Item { hwnd: h, grupo: g, r: dest, origem, minimizada: false });
+                    self.itens.push(Item { hwnd: h, grupo: g, r: dest, origem, minimizada: false, rotulo: None });
                 }
             }
             self.cartoes.push(Cartao { grupo, r, cab: cab_r, area });
         }
-        self.cartoes.push(Cartao { grupo: None, r: r_novo, cab: r_novo, area: r_novo });
 
+        for it in &self.itens {
+            if it.minimizada {
+                continue;
+            }
+            if let Ok(t) = unsafe { DwmRegisterThumbnail(self.janela, hwnd(it.hwnd)) } {
+                self.miniaturas.insert(it.hwnd, t);
+            }
+        }
+        self.aplicar_miniaturas();
+    }
+
+    /// Alt+Tab: todas as janelas (na ordem de uso) num grid, cada uma no seu quadro, sem
+    /// nenhuma por cima da outra; o nome vai numa faixa embaixo.
+    pub fn montar_lista(&mut self, grupos: &Grupos, mru: &[isize], monitor: RECT, w: f32, h: f32, s: f32) {
+        self.tirar_miniaturas();
+        self.cartoes.clear();
+        self.itens.clear();
+        self.hover = None;
+        self.hover_cartao = None;
+        self.assinatura = assinatura(grupos);
+
+        let js: Vec<(isize, usize)> = mru.iter().filter_map(|&j| grupos.grupo_de(j).map(|g| (j, g))).collect();
+        let n = js.len();
+        if n == 0 {
+            return;
+        }
+        let (topo, pad, vao) = (70.0 * s, 20.0 * s, 10.0 * s);
+        let rot = 26.0 * s;
+        let (aw, ah) = (w - 2.0 * pad, h - topo - pad);
+        // proporção do quadro = a mediana das janelas (terços são altos, maximizadas são largas),
+        // para a miniatura encher o quadro em vez de encolher dentro dele
+        let mut props: Vec<f32> = js
+            .iter()
+            .map(|&(j, _)| {
+                let (r, _) = onde(j);
+                ((r.bottom - r.top).max(1) as f32 / (r.right - r.left).max(1) as f32).clamp(0.35, 1.6)
+            })
+            .collect();
+        props.sort_by(|a, b| a.total_cmp(b));
+        let prop = props[props.len() / 2];
+        // colunas que deixam o quadro maior (sem passar de 80% da altura útil)
+        let mut melhor = (1usize, 0.0f32);
+        for cols in 1..=n {
+            let linhas = n.div_ceil(cols);
+            let cw = (aw - vao * (cols - 1) as f32) / cols as f32;
+            let ch = (ah - vao * (linhas - 1) as f32) / linhas as f32 - rot;
+            let larg = cw.min(ch / prop).min(ah * 0.8 / prop);
+            // empate (quadro já no limite): mais colunas, menos linhas
+            if larg >= melhor.1 - 0.5 {
+                melhor = (cols, larg);
+            }
+        }
+        let (cols, cw) = melhor;
+        let ch = cw * prop;
+        let linhas = n.div_ceil(cols);
+        let total_h = (ch + rot) * linhas as f32 + vao * (linhas - 1) as f32;
+        let y0 = topo + (ah - total_h) / 2.0;
+        for (i, &(j, g)) in js.iter().enumerate() {
+            let (c, l) = (i % cols, i / cols);
+            // a última linha, incompleta, fica centralizada
+            let nessa = if l == linhas - 1 { n - l * cols } else { cols };
+            let largura_linha = cw * nessa as f32 + vao * (nessa - 1) as f32;
+            let x = pad + (aw - largura_linha) / 2.0 + c as f32 * (cw + vao);
+            let y = y0 + l as f32 * (ch + rot + vao);
+            let celula = ret(x, y, x + cw, y + ch);
+            let rotulo = Some(ret(x, y + ch, x + cw, y + ch + rot));
+            let (rj, min) = onde(j);
+            if min {
+                self.itens.push(Item { hwnd: j, grupo: g, r: celula, origem: RECT::default(), minimizada: true, rotulo });
+                continue;
+            }
+            // a janela inteira, com a proporção dela, centrada no quadro
+            let v = RECT {
+                left: rj.left.max(monitor.left),
+                top: rj.top.max(monitor.top),
+                right: rj.right.min(monitor.right),
+                bottom: rj.bottom.min(monitor.bottom),
+            };
+            let (vw, vh) = ((v.right - v.left).max(1) as f32, (v.bottom - v.top).max(1) as f32);
+            let k = (cw / vw).min(ch / vh);
+            let (dw, dh) = (vw * k, vh * k);
+            let dx = x + (cw - dw) / 2.0;
+            let dy = y + (ch - dh) / 2.0;
+            let origem = RECT { left: v.left - rj.left, top: v.top - rj.top, right: v.right - rj.left, bottom: v.bottom - rj.top };
+            self.itens.push(Item { hwnd: j, grupo: g, r: ret(dx, dy, dx + dw, dy + dh), origem, minimizada: false, rotulo });
+        }
         for it in &self.itens {
             if it.minimizada {
                 continue;
@@ -259,7 +342,12 @@ impl Visao {
     /// Ordem para andar com as setas: grupo a grupo, da esquerda para a direita.
     pub fn ordem_espacial(&self) -> Vec<isize> {
         let mut v: Vec<&Item> = self.itens.iter().filter(|i| self.casa(i.hwnd)).collect();
-        v.sort_by(|a, b| (a.grupo, a.r.left as i32, a.r.top as i32).cmp(&(b.grupo, b.r.left as i32, b.r.top as i32)));
+        if self.lista {
+            // já estão na ordem de uso; as setas andam na leitura (linha a linha)
+            v.sort_by_key(|i| (i.r.top as i32 / 8, i.r.left as i32));
+        } else {
+            v.sort_by(|a, b| (a.grupo, a.r.left as i32, a.r.top as i32).cmp(&(b.grupo, b.r.left as i32, b.r.top as i32)));
+        }
         v.into_iter().map(|i| i.hwnd).collect()
     }
 }

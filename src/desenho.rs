@@ -94,6 +94,9 @@ pub struct JanelaV {
     pub selecionada: bool,
     pub hover: bool,
     pub apagada: bool,
+    /// Alt+Tab: faixa do nome embaixo do quadro, e o grupo da janela.
+    pub rotulo: Option<D2D_RECT_F>,
+    pub grupo: String,
 }
 
 pub struct CenaVisao {
@@ -104,6 +107,8 @@ pub struct CenaVisao {
     pub janelas: Vec<JanelaV>,
     pub filtro: String,
     pub titulo: String,
+    /// Aberta pelo Alt+Tab (quadros lado a lado).
+    pub lista: bool,
 }
 
 pub type Alvos = Vec<(D2D_RECT_F, Alvo)>;
@@ -219,30 +224,45 @@ impl Gfx {
         Ok(())
     }
 
-    fn bitmap(&mut self, icone: HICON) -> Option<ID2D1Bitmap> {
-        if icone.is_invalid() {
+    /// Ícone já reduzido para `tam` px com filtro bicúbico de alta qualidade (o DrawBitmap só
+    /// tem linear, que serrilha ao reduzir 32 → 16).
+    fn bitmap(&mut self, icone: HICON, tam: u32) -> Option<ID2D1Bitmap> {
+        if icone.is_invalid() || tam == 0 {
             return None;
         }
-        let chave = icone.0 as isize;
+        let chave = ((icone.0 as isize) << 8) ^ tam as isize;
         if let Some(b) = self.icones.get(&chave) {
             return Some(b.clone());
         }
-        if self.icones.len() > 400 {
+        if self.icones.len() > 600 {
             self.icones.clear();
         }
         let b = unsafe {
             let wb = self.wic.CreateBitmapFromHICON(icone).ok()?;
+            let (mut w, mut h) = (0u32, 0u32);
+            wb.GetSize(&mut w, &mut h).ok()?;
+            let fonte: IWICBitmapSource = if w != tam || h != tam {
+                let esc = self.wic.CreateBitmapScaler().ok()?;
+                esc.Initialize(&wb, tam, tam, WICBitmapInterpolationModeHighQualityCubic).ok()?;
+                esc.into()
+            } else {
+                wb.into()
+            };
             let conv = self.wic.CreateFormatConverter().ok()?;
-            conv.Initialize(&wb, &GUID_WICPixelFormat32bppPBGRA, WICBitmapDitherTypeNone, None, 0.0, WICBitmapPaletteTypeMedianCut).ok()?;
+            conv.Initialize(&fonte, &GUID_WICPixelFormat32bppPBGRA, WICBitmapDitherTypeNone, None, 0.0, WICBitmapPaletteTypeMedianCut).ok()?;
             self.rt.CreateBitmapFromWicBitmap(&conv, None).ok()?
         };
         self.icones.insert(chave, b.clone());
         Some(b)
     }
 
+    /// Desenha o ícone no tamanho exato do retângulo, alinhado ao pixel.
     fn icone(&mut self, ic: HICON, r: D2D_RECT_F, opac: f32) {
-        if let Some(b) = self.bitmap(ic) {
-            unsafe { self.rt.DrawBitmap(&b, Some(&r), opac, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR, None) };
+        let lado = (r.right - r.left).round().max(1.0);
+        let (x, y) = (r.left.round(), r.top.round());
+        if let Some(b) = self.bitmap(ic, lado as u32) {
+            let alvo = ret(x, y, x + lado, y + lado);
+            unsafe { self.rt.DrawBitmap(&b, Some(&alvo), opac, D2D1_BITMAP_INTERPOLATION_MODE_NEAREST_NEIGHBOR, None) };
         }
     }
 
@@ -420,13 +440,15 @@ impl Gfx {
         let f_nome = self.formato(12.0 * s, DWRITE_FONT_WEIGHT_BOLD, DWRITE_TEXT_ALIGNMENT_LEADING)?;
         let f_qtd = self.formato(12.0 * s, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_TEXT_ALIGNMENT_TRAILING)?;
         let f_min = self.formato(12.0 * s, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_TEXT_ALIGNMENT_LEADING)?;
-        let f_novo = self.formato(16.0 * s, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_TEXT_ALIGNMENT_CENTER)?;
+        let f_novo = self.formato(13.0 * s, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_TEXT_ALIGNMENT_CENTER)?;
 
         unsafe { self.rt.Clear(Some(&cor(t.fundo, 1.0))) };
 
         // topo: a janela escolhida e, embaixo, como usar ou o filtro
         self.texto(&c.titulo, &f_titulo, ret(40.0 * s, 12.0 * s, w - 40.0 * s, 38.0 * s), cor(t.texto_forte, 1.0))?;
-        let (dica, tinta) = if c.filtro.is_empty() {
+        let (dica, tinta) = if c.filtro.is_empty() && c.lista {
+            ("tab próxima · shift+tab anterior · setas andam · solte o alt para abrir · esc cancela".to_string(), t.texto)
+        } else if c.filtro.is_empty() {
             ("digite para filtrar · enter abre · arraste para outro grupo · duplo clique renomeia · esc fecha".to_string(), t.texto)
         } else {
             (format!("filtro: {}", c.filtro), t.destaque)
@@ -447,10 +469,7 @@ impl Gfx {
             if k.novo {
                 self.borda(k.r, cor(borda, 1.0), e)?;
                 let tinta = cor(if k.destino { t.amarelo } else { t.texto }, 1.0);
-                let cy = (k.r.top + k.r.bottom) / 2.0;
-                self.glifo(G_MAIS, &f_novo, ret(k.r.left, cy - 34.0 * s, k.r.right, cy - 8.0 * s), tinta)?;
-                self.texto("novo", &f_dica, ret(k.r.left, cy - 4.0 * s, k.r.right, cy + 12.0 * s), tinta)?;
-                self.texto("grupo", &f_dica, ret(k.r.left, cy + 12.0 * s, k.r.right, cy + 28.0 * s), tinta)?;
+                self.glifo(&format!("{G_MAIS}  novo grupo"), &f_novo, k.r, tinta)?;
                 continue;
             }
             self.preencher(k.area, cor(t.fundo_claro, 1.0))?;
@@ -464,7 +483,23 @@ impl Gfx {
 
         for j in &c.janelas {
             let a = if j.apagada { 0.3 } else { 1.0 };
-            if j.minimizada {
+            if let Some(rot) = j.rotulo {
+                // Alt+Tab: quadro inteiro; minimizada mostra o ícone grande no meio
+                if j.minimizada {
+                    self.preencher(j.r, cor(t.fundo_claro, a))?;
+                    let lado = 48.0 * s;
+                    let (cx, cy) = ((j.r.left + j.r.right) / 2.0, (j.r.top + j.r.bottom) / 2.0);
+                    self.icone(j.icone, ret(cx - lado / 2.0, cy - lado / 2.0, cx + lado / 2.0, cy + lado / 2.0), 0.7 * a);
+                }
+                let lado = 16.0 * s;
+                let cy = (rot.top + rot.bottom) / 2.0 + 2.0 * s;
+                let ri = ret(rot.left, cy - lado / 2.0, rot.left + lado, cy + lado / 2.0);
+                self.icone(j.icone, ri, a);
+                let lg = self.largura(&j.grupo, &f_min)?;
+                let nome = if j.selecionada { t.texto_forte } else { t.texto };
+                self.texto(&j.titulo, &f_min, ret(ri.right + 7.0 * s, rot.top + 4.0 * s, rot.right - lg - 12.0 * s, rot.bottom), cor(nome, a))?;
+                self.texto(&j.grupo, &f_min, ret(rot.right - lg - 2.0 * s, rot.top + 4.0 * s, rot.right, rot.bottom), cor(mistura(t.texto, t.fundo, 0.3), a))?;
+            } else if j.minimizada {
                 // sem miniatura: ícone e título numa faixa
                 self.preencher(j.r, cor(t.selecao, a))?;
                 let lado = (14.0 * s).min(j.r.bottom - j.r.top - 4.0 * s);
