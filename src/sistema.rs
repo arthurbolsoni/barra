@@ -62,8 +62,9 @@ pub fn definir_inicio(ligar: bool) {
     }
 }
 
+/// Barra do Explorer (pula a `Shell_TrayWnd` invisível da própria barra).
 fn barra_windows() -> Option<HWND> {
-    unsafe { FindWindowW(w!("Shell_TrayWnd"), PCWSTR::null()).ok().filter(|h| !h.is_invalid()) }
+    crate::bandeja::barra_do_explorer()
 }
 
 /// Barras do Windows nos outros monitores.
@@ -142,12 +143,6 @@ pub fn barra_windows_escondida() -> bool {
     ler(ESTADO_ANTES).is_some()
 }
 
-/// Abre o menu Iniciar do próprio Windows.
-pub fn abrir_iniciar() {
-    if let Some(tw) = barra_windows() {
-        unsafe { _ = PostMessageW(Some(tw), WM_SYSCOMMAND, WPARAM(SC_TASKLIST as usize), LPARAM(0)) };
-    }
-}
 
 fn abrir_uri(uri: PCWSTR) {
     unsafe { ShellExecuteW(None, w!("open"), uri, PCWSTR::null(), PCWSTR::null(), SW_SHOWNORMAL) };

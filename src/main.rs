@@ -1,10 +1,13 @@
 #![windows_subsystem = "windows"]
 
 mod appbar;
+mod bandeja;
 mod desenho;
 mod grupos;
 mod janelas;
 mod sistema;
+mod teclado;
+mod visao;
 
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
@@ -19,11 +22,13 @@ use windows::Win32::System::SystemInformation::GetLocalTime;
 use windows::Win32::System::Threading::CreateMutexW;
 use windows::Win32::UI::Accessibility::{SetWinEventHook, HWINEVENTHOOK};
 use windows::Win32::UI::HiDpi::{GetDpiForWindow, SetProcessDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2};
-use windows::Win32::UI::Input::KeyboardAndMouse::{TrackMouseEvent, TME_LEAVE, TRACKMOUSEEVENT};
+use windows::Win32::UI::Input::KeyboardAndMouse::*;
+use windows::Win32::UI::Shell::{DefSubclassProc, SetWindowSubclass};
 use windows::Win32::UI::WindowsAndMessaging::*;
 
-use desenho::{Alvo, Alvos, Cena, ItemGrupo, ItemJanela};
+use desenho::{Alvo, Alvos, CartaoV, Cena, CenaVisao, ItemBandeja, ItemGrupo, ItemJanela, JanelaV};
 use janelas::hwnd;
+use teclado::{forcar_primeiro_plano, MODO_ALT};
 
 /// Altura da barra a 100% de escala.
 const ALTURA: f32 = 40.0;
@@ -31,8 +36,12 @@ const CLASSE: PCWSTR = w!("BarraTarefas");
 const TITULO: PCWSTR = w!("barra");
 const WM_APPBAR: u32 = WM_APP + 1;
 const WM_PRIMEIRO_PLANO: u32 = WM_APP + 2;
+const WM_RENOMEAR: u32 = WM_APP + 3;
 const TIMER: usize = 1;
+const TIMER_ALT: usize = 2;
 const WM_MOUSELEAVE: u32 = 0x02A3;
+/// Preferência: Alt+Tab abre a visão geral (padrão: sim).
+const PREF_ALT_TAB: PCWSTR = w!("AltTab");
 
 // avisos do gancho de shell (RegisterShellHookWindow)
 const HSHELL_CRIADA: usize = 1;
@@ -49,10 +58,20 @@ const ABN_TELA_CHEIA: usize = 2;
 
 struct Estado {
     barra: HWND,
-    /// Janela oculta, dona dos menus.
+    /// Janela oculta, dona dos menus da barra.
     menus: HWND,
+    /// Dica (tooltip) dos botões e dos ícones da bandeja.
+    dica: HWND,
+    dica_texto: String,
+    visao_hwnd: HWND,
     gfx: desenho::Gfx,
     grupos: grupos::Grupos,
+    visao: visao::Visao,
+    /// Janelas da mais recente para a mais antiga em foco (ordem do Alt+Tab).
+    mru: Vec<isize>,
+    /// Alt+Tab apertado e ainda sem mostrar a visão geral (toque rápido só troca de janela).
+    alt_pendente: bool,
+    alt_indice: usize,
     alvos: Alvos,
     hover: Option<Alvo>,
     piscando: HashSet<isize>,
@@ -69,6 +88,8 @@ thread_local! {
 
 /// Janela da barra, para o gancho de primeiro plano postar mesmo com o estado em uso.
 static BARRA: AtomicIsize = AtomicIsize::new(0);
+static VISAO: AtomicIsize = AtomicIsize::new(0);
+static DICA: AtomicIsize = AtomicIsize::new(0);
 
 /// Acesso ao estado. Devolve None se ele já está em uso (mensagem que chegou no meio de
 /// outra operação, enquanto o Windows espera outra janela responder).
@@ -76,8 +97,15 @@ fn com<R>(f: impl FnOnce(&mut Estado) -> R) -> Option<R> {
     ESTADO.with(|e| e.try_borrow_mut().ok().and_then(|mut g| g.as_mut().map(f)))
 }
 
+fn invalidar(h: HWND) {
+    unsafe { _ = InvalidateRect(Some(h), None, false) };
+}
+
 fn redesenhar(st: &Estado) {
-    unsafe { _ = InvalidateRect(Some(st.barra), None, false) };
+    invalidar(st.barra);
+    if st.visao.aberta {
+        invalidar(st.visao_hwnd);
+    }
 }
 
 fn raiz(h: HWND) -> isize {
@@ -93,6 +121,15 @@ fn atualizar(st: &mut Estado) {
     st.grupos.sincronizar(&atuais);
     st.icones.retain(|h, _| atuais.contains(h));
     st.piscando.retain(|h| atuais.contains(h));
+    st.mru.retain(|h| atuais.contains(h));
+    for h in atuais {
+        if !st.mru.contains(&h) {
+            st.mru.push(h);
+        }
+    }
+    if st.visao.aberta && st.visao.editando.is_none() && st.visao.arrasto.is_none() && visao::assinatura(&st.grupos) != st.visao.assinatura {
+        remontar_visao(st);
+    }
     redesenhar(st);
 }
 
@@ -106,9 +143,13 @@ fn posicionar(st: &mut Estado) {
     redesenhar(st);
 }
 
+fn icone_de(st: &mut Estado, j: isize) -> HICON {
+    let tam = (32.0 * st.escala) as i32;
+    *st.icones.entry(j).or_insert_with(|| janelas::icone(hwnd(j), tam))
+}
+
 fn cena(st: &mut Estado, w: i32, h: i32) -> Cena {
     let fg = primeiro_plano();
-    let tam_icone = (32.0 * st.escala) as i32;
     let ativo = st.grupos.ativo;
     let grupos = st
         .grupos
@@ -117,17 +158,21 @@ fn cena(st: &mut Estado, w: i32, h: i32) -> Cena {
         .enumerate()
         .map(|(i, g)| ItemGrupo { nome: g.nome.clone(), qtd: g.janelas.len(), ativo: i == ativo })
         .collect();
-    let icones = &mut st.icones;
-    let janelas = st.grupos.lista[ativo]
-        .janelas
-        .iter()
-        .map(|&j| ItemJanela {
-            hwnd: j,
-            titulo: janelas::titulo(hwnd(j)),
-            icone: *icones.entry(j).or_insert_with(|| janelas::icone(hwnd(j), tam_icone)),
-            ativa: j == fg,
-            minimizada: unsafe { IsIconic(hwnd(j)).as_bool() },
-            piscando: st.piscando.contains(&j),
+    let lista = st.grupos.lista[ativo].janelas.clone();
+    let janelas = lista
+        .into_iter()
+        .map(|j| {
+            let p = bandeja::progresso(j);
+            ItemJanela {
+                hwnd: j,
+                titulo: janelas::titulo(hwnd(j)),
+                icone: icone_de(st, j),
+                ativa: j == fg,
+                minimizada: unsafe { IsIconic(hwnd(j)).as_bool() },
+                piscando: st.piscando.contains(&j),
+                selo: p.selo,
+                progresso: (p.estado != 0).then_some((p.estado, p.fracao)),
+            }
         })
         .collect();
     let t = unsafe { GetLocalTime() };
@@ -140,6 +185,7 @@ fn cena(st: &mut Estado, w: i32, h: i32) -> Cena {
         hover: st.hover,
         hora: format!("{:02}:{:02}", t.wHour, t.wMinute),
         data: format!("{:02}/{:02}/{}", t.wDay, t.wMonth, t.wYear),
+        bandeja: bandeja::visiveis().into_iter().map(|(indice, icone, _)| ItemBandeja { indice, icone }).collect(),
     }
 }
 
@@ -148,23 +194,24 @@ fn alvo_em(alvos: &Alvos, x: i32, y: i32) -> Option<Alvo> {
     alvos.iter().find(|(r, _)| x >= r.left && x < r.right && y >= r.top && y < r.bottom).map(|(_, a)| *a)
 }
 
-fn focar(h: isize) {
-    let j = hwnd(h);
-    unsafe {
-        if IsIconic(j).as_bool() {
-            _ = ShowWindow(j, SW_RESTORE);
-        }
-        _ = SetForegroundWindow(j);
+/// Troca para o grupo e põe em foco `janela` (ou a última em foco do grupo).
+fn ir(grupo: usize, janela: Option<isize>) {
+    let foco = com(|st| {
+        let f = st.grupos.trocar(grupo);
+        redesenhar(st);
+        f
+    })
+    .flatten();
+    if let Some(h) = janela.or(foco) {
+        forcar_primeiro_plano(hwnd(h));
     }
 }
 
-fn trocar(i: usize) {
-    if let Some(Some(foco)) = com(|st| {
-        let f = st.grupos.trocar(i);
-        redesenhar(st);
-        f
-    }) {
-        focar(foco);
+fn ir_janela(h: isize) {
+    if let Some(Some(g)) = com(|st| st.grupos.grupo_de(h)) {
+        ir(g, Some(h));
+    } else {
+        forcar_primeiro_plano(hwnd(h));
     }
 }
 
@@ -174,24 +221,238 @@ fn clicar_janela(h: isize) {
     if primeiro_plano() == h && unsafe { !IsIconic(j).as_bool() } {
         unsafe { _ = ShowWindow(j, SW_MINIMIZE) };
     } else {
-        focar(h);
+        forcar_primeiro_plano(j);
     }
+}
+
+fn cursor() -> POINT {
+    let mut pt = POINT::default();
+    unsafe { _ = GetCursorPos(&mut pt) };
+    pt
 }
 
 fn clicar(alvo: Alvo) {
     match alvo {
-        Alvo::Iniciar => sistema::abrir_iniciar(),
-        Alvo::Grupo(i) => trocar(i),
+        Alvo::Grupo(i) => ir(i, None),
         Alvo::NovoGrupo => {
             if let Some(i) = com(|st| st.grupos.novo()) {
-                trocar(i);
+                ir(i, None);
             }
         }
         Alvo::Janela(h) => clicar_janela(h),
+        Alvo::Bandeja(i) => bandeja::clicar(i, bandeja::Botao::Esquerdo, cursor()),
         Alvo::Sistema => sistema::abrir_configuracoes_rapidas(),
         Alvo::Relogio => sistema::abrir_notificacoes(),
     }
 }
+
+// ---------- dica ----------
+
+fn mostrar_dica(st: &mut Estado) {
+    let texto = match st.hover {
+        Some(Alvo::Bandeja(i)) => bandeja::visiveis().into_iter().find(|(n, _, _)| *n == i).map(|(_, _, d)| d).unwrap_or_default(),
+        Some(Alvo::Janela(h)) => janelas::titulo(hwnd(h)),
+        _ => String::new(),
+    };
+    let r = st.hover.and_then(|a| st.alvos.iter().find(|(_, b)| *b == a).map(|(r, _)| *r));
+    let (Some(r), false) = (r, texto.is_empty()) else {
+        st.dica_texto.clear();
+        unsafe { _ = ShowWindow(st.dica, SW_HIDE) };
+        return;
+    };
+    let (w, h) = st.gfx.medir_dica(&texto, st.escala);
+    let mut b = RECT::default();
+    unsafe { _ = GetWindowRect(st.barra, &mut b) };
+    let m = appbar::monitor();
+    let x = (b.left + ((r.left + r.right) / 2.0) as i32 - w / 2).clamp(m.left + 4, m.right - w - 4);
+    let y = b.top - h - (6.0 * st.escala) as i32;
+    st.dica_texto = texto;
+    unsafe {
+        _ = SetWindowPos(st.dica, Some(HWND_TOPMOST), x, y, w, h, SWP_NOACTIVATE | SWP_SHOWWINDOW);
+    }
+    invalidar(st.dica);
+}
+
+// ---------- visão geral ----------
+
+fn remontar_visao(st: &mut Estado) {
+    let m = appbar::monitor();
+    let mut c = RECT::default();
+    unsafe { _ = GetClientRect(st.visao_hwnd, &mut c) };
+    st.visao.montar(&st.grupos, m, c.right as f32, c.bottom as f32, st.escala);
+    invalidar(st.visao_hwnd);
+}
+
+fn abrir_visao(modo_alt: bool, selecao: Option<isize>) {
+    let Some(Some(v)) = com(|st| {
+        if st.visao.aberta {
+            return None;
+        }
+        st.visao.anterior = primeiro_plano();
+        st.visao.aberta = true;
+        st.visao.filtro.clear();
+        st.visao.arrasto = None;
+        st.visao.selecao = selecao.or_else(|| st.mru.first().copied());
+        let m = appbar::monitor();
+        unsafe {
+            _ = SetWindowPos(st.visao_hwnd, Some(HWND_TOPMOST), m.left, m.top, m.right - m.left, m.bottom - m.top, SWP_SHOWWINDOW);
+        }
+        remontar_visao(st);
+        unsafe { _ = ShowWindow(st.dica, SW_HIDE) };
+        Some(st.visao_hwnd)
+    }) else {
+        return;
+    };
+    MODO_ALT.store(modo_alt, Ordering::Relaxed);
+    forcar_primeiro_plano(v);
+}
+
+/// Fecha a visão geral; `voltar` devolve o foco para a janela de antes.
+fn fechar_visao(voltar: bool) {
+    MODO_ALT.store(false, Ordering::Relaxed);
+    let Some(Some(anterior)) = com(|st| {
+        if !st.visao.aberta {
+            return None;
+        }
+        st.visao.aberta = false;
+        st.visao.tirar_miniaturas();
+        st.visao.arrasto = None;
+        if let Some((_, e)) = st.visao.editando.take() {
+            unsafe { _ = DestroyWindow(e) };
+        }
+        unsafe { _ = ShowWindow(st.visao_hwnd, SW_HIDE) };
+        Some(st.visao.anterior)
+    }) else {
+        return;
+    };
+    if voltar && anterior != 0 {
+        forcar_primeiro_plano(hwnd(anterior));
+    }
+}
+
+fn escolher_selecao() {
+    let sel = com(|st| st.visao.selecao).flatten();
+    fechar_visao(false);
+    if let Some(h) = sel {
+        ir_janela(h);
+    }
+}
+
+/// Anda `passo` na lista (MRU ou espacial) a partir da seleção.
+fn andar(st: &mut Estado, espacial: bool, passo: i32) {
+    let lista: Vec<isize> = if espacial {
+        st.visao.ordem_espacial()
+    } else {
+        st.mru.iter().copied().filter(|&h| st.visao.casa(h)).collect()
+    };
+    if lista.is_empty() {
+        return;
+    }
+    let n = lista.len() as i32;
+    let i = st.visao.selecao.and_then(|s| lista.iter().position(|&h| h == s)).map(|i| i as i32).unwrap_or(-1);
+    let novo = if i < 0 { if passo > 0 { 0 } else { n - 1 } } else { (i + passo).rem_euclid(n) };
+    st.visao.selecao = Some(lista[novo as usize]);
+    invalidar(st.visao_hwnd);
+}
+
+fn cena_visao(st: &mut Estado, w: i32, h: i32) -> CenaVisao {
+    let ativo = st.grupos.ativo;
+    let destino = st.visao.arrasto.as_ref().filter(|a| a.ativo).and_then(|_| st.visao.hover_cartao);
+    let cartoes = st
+        .visao
+        .cartoes
+        .iter()
+        .enumerate()
+        .map(|(i, c)| {
+            let (nome, qtd) = match c.grupo {
+                Some(g) => (st.grupos.lista[g].nome.clone(), st.grupos.lista[g].janelas.len()),
+                None => (String::new(), 0),
+            };
+            CartaoV {
+                r: c.r,
+                cab: c.cab,
+                area: c.area,
+                nome,
+                qtd,
+                ativo: c.grupo == Some(ativo),
+                novo: c.grupo.is_none(),
+                hover: st.visao.hover_cartao == Some(i),
+                destino: destino == Some(i),
+            }
+        })
+        .collect();
+    let itens: Vec<_> = st.visao.itens.iter().enumerate().map(|(i, it)| (it.hwnd, it.r, it.minimizada, st.visao.hover == Some(i))).collect();
+    let mut janelas_v = Vec::new();
+    for (j, r, minimizada, hover) in itens {
+        janelas_v.push(JanelaV {
+            r,
+            titulo: janelas::titulo(hwnd(j)),
+            icone: icone_de(st, j),
+            minimizada,
+            selecionada: st.visao.selecao == Some(j),
+            hover,
+            apagada: !st.visao.casa(j),
+        });
+    }
+    let titulo = st.visao.selecao.map(|s| janelas::titulo(hwnd(s))).unwrap_or_default();
+    CenaVisao { w, h, escala: st.escala, cartoes, janelas: janelas_v, filtro: st.visao.filtro.clone(), titulo }
+}
+
+fn comecar_renomear(g: usize) {
+    _ = com(|st| unsafe {
+        if g >= st.grupos.lista.len() {
+            return;
+        }
+        let Some(c) = st.visao.cartoes.iter().find(|c| c.grupo == Some(g)) else { return };
+        let s = st.escala;
+        let (x, y) = ((c.cab.left + 10.0 * s) as i32, (c.cab.top + 7.0 * s) as i32);
+        let (w, h) = (((c.cab.right - c.cab.left) - 140.0 * s).max(120.0 * s) as i32, (c.cab.bottom - c.cab.top - 14.0 * s) as i32);
+        let nome: Vec<u16> = st.grupos.lista[g].nome.encode_utf16().chain([0]).collect();
+        let Ok(e) = CreateWindowExW(
+            WINDOW_EX_STYLE(0),
+            w!("EDIT"),
+            PCWSTR(nome.as_ptr()),
+            WS_CHILD | WS_VISIBLE | WINDOW_STYLE(ES_AUTOHSCROLL as u32),
+            x, y, w, h,
+            Some(st.visao_hwnd), None, None, None,
+        ) else {
+            return;
+        };
+        let fonte = CreateFontW(
+            -(16.0 * s) as i32, 0, 0, 0, FW_SEMIBOLD.0 as i32, 0, 0, 0,
+            DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, 0,
+            w!("Segoe UI Variable Text"),
+        );
+        SendMessageW(e, WM_SETFONT, Some(WPARAM(fonte.0 as usize)), Some(LPARAM(1)));
+        _ = SetWindowSubclass(e, Some(proc_edicao), 1, 0);
+        SendMessageW(e, 0x00B1 /* EM_SETSEL */, Some(WPARAM(0)), Some(LPARAM(-1)));
+        _ = SetFocus(Some(e));
+        st.visao.editando = Some((g, e));
+    });
+}
+
+unsafe extern "system" fn proc_edicao(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM, _: usize, _: usize) -> LRESULT {
+    let visao = HWND(VISAO.load(Ordering::Relaxed) as *mut _);
+    match msg {
+        WM_KEYDOWN if wp.0 == VK_RETURN.0 as usize => {
+            _ = PostMessageW(Some(visao), WM_RENOMEAR, WPARAM(1), LPARAM(0));
+            LRESULT(0)
+        }
+        WM_KEYDOWN if wp.0 == VK_ESCAPE.0 as usize => {
+            _ = PostMessageW(Some(visao), WM_RENOMEAR, WPARAM(0), LPARAM(0));
+            LRESULT(0)
+        }
+        // sem o "bip" do Enter/Esc numa caixa de uma linha
+        WM_CHAR if wp.0 == 13 || wp.0 == 27 => LRESULT(0),
+        WM_KILLFOCUS => {
+            _ = PostMessageW(Some(visao), WM_RENOMEAR, WPARAM(1), LPARAM(0));
+            DefSubclassProc(h, msg, wp, lp)
+        }
+        _ => DefSubclassProc(h, msg, wp, lp),
+    }
+}
+
+// ---------- menus ----------
 
 /// Item de menu: (id, texto, marcado, habilitado). id 0 = separador.
 type Item = (usize, String, bool, bool);
@@ -218,30 +479,68 @@ fn montar_menu(itens: &[Item]) -> Option<HMENU> {
     }
 }
 
-/// Mostra o menu acima da barra e devolve o id escolhido (0 = nada).
-fn mostrar_menu(dono: HWND, barra: HWND, m: HMENU) -> usize {
+/// Mostra o menu no ponto (embaixo: acima da barra) e devolve o id escolhido (0 = nada).
+fn mostrar_menu(dono: HWND, m: HMENU, pt: POINT, acima: bool) -> usize {
     unsafe {
-        let mut pt = POINT::default();
-        _ = GetCursorPos(&mut pt);
-        let mut r = RECT::default();
-        _ = GetWindowRect(barra, &mut r);
         _ = SetForegroundWindow(dono); // sem isso o menu não fecha ao clicar fora
-        let id = TrackPopupMenu(m, TPM_RIGHTBUTTON | TPM_RETURNCMD | TPM_NONOTIFY | TPM_BOTTOMALIGN, pt.x, r.top, None, dono, None);
+        let mut f = TPM_RIGHTBUTTON | TPM_RETURNCMD | TPM_NONOTIFY;
+        if acima {
+            f |= TPM_BOTTOMALIGN;
+        }
+        let id = TrackPopupMenu(m, f, pt.x, pt.y, None, dono, None);
         _ = PostMessageW(Some(dono), WM_NULL, WPARAM(0), LPARAM(0));
         _ = DestroyMenu(m);
         id.0 as usize
     }
 }
 
+fn ponto_da_barra(barra: HWND) -> POINT {
+    let mut r = RECT::default();
+    unsafe { _ = GetWindowRect(barra, &mut r) };
+    POINT { x: cursor().x, y: r.top }
+}
+
 const MENU_NOVO_GRUPO_COM: usize = 2;
 const MENU_FECHAR: usize = 3;
 const MENU_APAGAR_GRUPO: usize = 10;
 const MENU_NOVO_GRUPO: usize = 11;
+const MENU_RENOMEAR: usize = 12;
 const MENU_ESCONDER: usize = 20;
 const MENU_INICIAR: usize = 21;
 const MENU_JUNTAR: usize = 22;
 const MENU_SAIR: usize = 23;
+const MENU_ALT_TAB: usize = 24;
+const MENU_VISAO: usize = 25;
 const MENU_MOVER: usize = 100;
+
+fn menu_grupo(dono: HWND, i: usize, pt: POINT, acima: bool) {
+    let Some(nomes) = com(|st| st.grupos.lista.iter().map(|g| g.nome.clone()).collect::<Vec<_>>()) else { return };
+    if i >= nomes.len() {
+        return;
+    }
+    let itens = vec![
+        (MENU_RENOMEAR, "Renomear".to_string(), false, true),
+        (MENU_NOVO_GRUPO, "Novo grupo".to_string(), false, true),
+        (0, String::new(), false, true),
+        (MENU_APAGAR_GRUPO, format!("Apagar o grupo {} (as janelas vão para o anterior)", nomes[i]), false, nomes.len() > 1),
+    ];
+    let Some(m) = montar_menu(&itens) else { return };
+    match mostrar_menu(dono, m, pt, acima) {
+        MENU_RENOMEAR => {
+            abrir_visao(false, None);
+            comecar_renomear(i);
+        }
+        MENU_NOVO_GRUPO => _ = com(|st| st.grupos.novo()),
+        MENU_APAGAR_GRUPO => _ = com(|st| st.grupos.apagar(i)),
+        _ => {}
+    }
+    _ = com(|st| {
+        if st.visao.aberta && st.visao.editando.is_none() {
+            remontar_visao(st);
+        }
+        redesenhar(st);
+    });
+}
 
 fn clicar_direito(alvo: Option<Alvo>) {
     let Some((dono, barra, nomes, grupo_da_janela, esconder)) = com(|st| {
@@ -254,24 +553,26 @@ fn clicar_direito(alvo: Option<Alvo>) {
     }) else {
         return;
     };
+    let pt = ponto_da_barra(barra);
 
-    let menu = match alvo {
+    match alvo {
+        Some(Alvo::Bandeja(i)) => bandeja::clicar(i, bandeja::Botao::Direito, cursor()),
+        Some(Alvo::Grupo(i)) => menu_grupo(dono, i, pt, true),
         Some(Alvo::Janela(h)) => unsafe {
             let Ok(m) = CreatePopupMenu() else { return };
-            let mut outros = vec![];
-            for (i, n) in nomes.iter().enumerate() {
-                if Some(i) != grupo_da_janela {
-                    outros.push((MENU_MOVER + i, format!("Grupo {n}"), false, true));
-                }
-            }
+            let outros: Vec<Item> = nomes
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| Some(*i) != grupo_da_janela)
+                .map(|(i, n)| (MENU_MOVER + i, format!("Grupo {n}"), false, true))
+                .collect();
             if let Some(sub) = montar_menu(&outros).filter(|_| !outros.is_empty()) {
                 _ = AppendMenuW(m, MF_POPUP, sub.0 as usize, w!("Mover para"));
             }
             _ = AppendMenuW(m, MF_STRING, MENU_NOVO_GRUPO_COM, w!("Novo grupo com esta janela"));
             _ = AppendMenuW(m, MF_SEPARATOR, 0, None);
             _ = AppendMenuW(m, MF_STRING, MENU_FECHAR, w!("Fechar janela"));
-            let id = mostrar_menu(dono, barra, m);
-            match id {
+            match mostrar_menu(dono, m, pt, true) {
                 MENU_FECHAR => _ = PostMessageW(Some(hwnd(h)), WM_CLOSE, WPARAM(0), LPARAM(0)),
                 MENU_NOVO_GRUPO_COM => _ = com(|st| {
                     let i = st.grupos.novo();
@@ -284,57 +585,59 @@ fn clicar_direito(alvo: Option<Alvo>) {
                 }),
                 _ => {}
             }
-            return;
         },
-        Some(Alvo::Grupo(i)) => {
-            let itens = vec![
-                (MENU_NOVO_GRUPO, "Novo grupo".to_string(), false, true),
+        _ => {
+            let alt_tab = teclado::ALT_TAB.load(Ordering::Relaxed);
+            let Some(m) = montar_menu(&[
+                (MENU_VISAO, "Visão geral (Win+Tab)".into(), false, true),
                 (0, String::new(), false, true),
-                (MENU_APAGAR_GRUPO, format!("Apagar o grupo {} (as janelas vão para o anterior)", nomes[i]), false, nomes.len() > 1),
-            ];
-            let Some(m) = montar_menu(&itens) else { return };
-            match mostrar_menu(dono, barra, m) {
-                MENU_NOVO_GRUPO => _ = com(|st| st.grupos.novo()),
-                MENU_APAGAR_GRUPO => _ = com(|st| st.grupos.apagar(i)),
+                (MENU_ESCONDER, "Esconder a barra do Windows".into(), esconder, true),
+                (MENU_ALT_TAB, "Alt+Tab abre a visão geral".into(), alt_tab, true),
+                (MENU_INICIAR, "Iniciar com o Windows".into(), sistema::inicia_com_windows(), true),
+                (MENU_JUNTAR, "Juntar todas as janelas num grupo só".into(), false, true),
+                (0, String::new(), false, true),
+                (MENU_SAIR, "Sair".into(), false, true),
+            ]) else {
+                return;
+            };
+            match mostrar_menu(dono, m, pt, true) {
+                MENU_VISAO => abrir_visao(false, None),
+                MENU_ESCONDER => {
+                    let ligar = !esconder;
+                    sistema::gravar(sistema::PREF_ESCONDER, Some(ligar as u32));
+                    if ligar {
+                        sistema::esconder_barra_windows();
+                        bandeja::ligar(barra);
+                    } else {
+                        bandeja::desligar();
+                        sistema::mostrar_barra_windows();
+                    }
+                    _ = com(|st| {
+                        st.esconder_windows = ligar;
+                        posicionar(st);
+                    });
+                }
+                MENU_ALT_TAB => {
+                    teclado::ALT_TAB.store(!alt_tab, Ordering::Relaxed);
+                    sistema::gravar(PREF_ALT_TAB, Some(!alt_tab as u32));
+                }
+                MENU_INICIAR => sistema::definir_inicio(!sistema::inicia_com_windows()),
+                MENU_JUNTAR => _ = com(|st| {
+                    st.grupos.juntar_tudo();
+                    redesenhar(st);
+                }),
+                MENU_SAIR => unsafe { _ = DestroyWindow(barra) },
                 _ => {}
             }
-            _ = com(|st| redesenhar(st));
-            return;
         }
-        _ => montar_menu(&[
-            (MENU_ESCONDER, "Esconder a barra do Windows".into(), esconder, true),
-            (MENU_INICIAR, "Iniciar com o Windows".into(), sistema::inicia_com_windows(), true),
-            (MENU_JUNTAR, "Juntar todas as janelas num grupo só".into(), false, true),
-            (0, String::new(), false, true),
-            (MENU_SAIR, "Sair".into(), false, true),
-        ]),
-    };
-    let Some(m) = menu else { return };
-    match mostrar_menu(dono, barra, m) {
-        MENU_ESCONDER => _ = com(|st| {
-            st.esconder_windows = !st.esconder_windows;
-            if st.esconder_windows {
-                sistema::gravar(sistema::PREF_ESCONDER, Some(1));
-                sistema::esconder_barra_windows();
-            } else {
-                sistema::gravar(sistema::PREF_ESCONDER, None);
-                sistema::mostrar_barra_windows();
-            }
-            posicionar(st);
-        }),
-        MENU_INICIAR => sistema::definir_inicio(!sistema::inicia_com_windows()),
-        MENU_JUNTAR => _ = com(|st| {
-            st.grupos.juntar_tudo();
-            redesenhar(st);
-        }),
-        MENU_SAIR => unsafe { _ = DestroyWindow(barra) },
-        _ => {}
     }
 }
 
-/// Saída e desligamento: janelas de volta à tela, barra do Windows de volta.
+/// Saída e desligamento: janelas de volta à tela, ícones e barra do Windows de volta.
 fn limpar() {
+    fechar_visao(false);
     grupos::trazer_todas_de_volta();
+    bandeja::desligar();
     _ = com(|st| appbar::remover(st.barra));
     if sistema::barra_windows_escondida() {
         sistema::mostrar_barra_windows();
@@ -352,11 +655,30 @@ unsafe extern "system" fn ao_primeiro_plano(_: HWINEVENTHOOK, _: u32, h: HWND, _
 }
 
 unsafe extern "system" fn proc_janela(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
-    let barra = HWND(BARRA.load(Ordering::Relaxed) as *mut _);
-    let (msg_shell, msg_barra_criada) = com(|st| (st.msg_shell, st.msg_barra_criada)).unwrap_or((0, 0));
-    if h != barra || barra.is_invalid() {
-        return DefWindowProcW(h, msg, wp, lp);
+    if h.0 as isize == BARRA.load(Ordering::Relaxed) {
+        proc_barra(h, msg, wp, lp)
+    } else if h.0 as isize == VISAO.load(Ordering::Relaxed) {
+        proc_visao(h, msg, wp, lp)
+    } else if h.0 as isize == DICA.load(Ordering::Relaxed) && msg == WM_PAINT {
+        let mut ps = PAINTSTRUCT::default();
+        let dc = BeginPaint(h, &mut ps);
+        let mut r = RECT::default();
+        _ = GetClientRect(h, &mut r);
+        _ = com(|st| {
+            let t = st.dica_texto.clone();
+            _ = st.gfx.desenhar_dica(dc, r.right, r.bottom, &t, st.escala);
+        });
+        _ = EndPaint(h, &ps);
+        LRESULT(0)
+    } else if msg == WM_MOUSEACTIVATE && h.0 as isize == DICA.load(Ordering::Relaxed) {
+        LRESULT(MA_NOACTIVATE as isize)
+    } else {
+        DefWindowProcW(h, msg, wp, lp)
     }
+}
+
+unsafe fn proc_barra(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
+    let (msg_shell, msg_barra_criada) = com(|st| (st.msg_shell, st.msg_barra_criada)).unwrap_or((0, 0));
     if msg != 0 && msg == msg_shell {
         _ = com(|st| {
             let j = lp.0 as isize;
@@ -393,6 +715,20 @@ unsafe extern "system" fn proc_janela(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM)
                 if let Ok(a) = st.gfx.desenhar(dc, &c) {
                     st.alvos = a;
                 }
+                // a área da bandeja vai para a Shell_TrayWnd própria (programas leem dali)
+                let mut b = RECT::default();
+                _ = GetWindowRect(st.barra, &mut b);
+                let icones: Vec<_> = st.alvos.iter().filter(|(_, a)| matches!(a, Alvo::Bandeja(_))).map(|(r, _)| *r).collect();
+                let area = match (icones.first(), icones.last()) {
+                    (Some(p), Some(u)) => RECT {
+                        left: b.left + p.left.min(u.left) as i32,
+                        top: b.top,
+                        right: b.left + p.right.max(u.right) as i32,
+                        bottom: b.bottom,
+                    },
+                    _ => RECT { left: b.right - 200, top: b.top, right: b.right - 150, bottom: b.bottom },
+                };
+                bandeja::posicionar(b, area);
             });
             _ = EndPaint(h, &ps);
             LRESULT(0)
@@ -405,6 +741,7 @@ unsafe extern "system" fn proc_janela(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM)
                 let a = alvo_em(&st.alvos, x, y);
                 if a != st.hover {
                     st.hover = a;
+                    mostrar_dica(st);
                     redesenhar(st);
                 }
             });
@@ -415,6 +752,7 @@ unsafe extern "system" fn proc_janela(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM)
         WM_MOUSELEAVE => {
             _ = com(|st| {
                 st.hover = None;
+                mostrar_dica(st);
                 redesenhar(st);
             });
             LRESULT(0)
@@ -423,6 +761,13 @@ unsafe extern "system" fn proc_janela(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM)
             let (x, y) = xy(lp);
             if let Some(Some(a)) = com(|st| alvo_em(&st.alvos, x, y)) {
                 clicar(a);
+            }
+            LRESULT(0)
+        }
+        WM_LBUTTONDBLCLK => {
+            let (x, y) = xy(lp);
+            if let Some(Some(Alvo::Bandeja(i))) = com(|st| alvo_em(&st.alvos, x, y)) {
+                bandeja::clicar(i, bandeja::Botao::Duplo, cursor());
             }
             LRESULT(0)
         }
@@ -444,25 +789,92 @@ unsafe extern "system" fn proc_janela(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM)
                 sobre_grupos.then(|| if delta < 0 { (st.grupos.ativo + 1) % n } else { (st.grupos.ativo + n - 1) % n })
             });
             if let Some(Some(i)) = destino {
-                trocar(i);
+                ir(i, None);
             }
             LRESULT(0)
         }
         WM_PRIMEIRO_PLANO => {
-            // janela de outro grupo veio para a frente (Alt+Tab, clique na notificação):
+            // janela de outro grupo veio para a frente (barra do Windows, notificação):
             // troca para o grupo dela
             let j = raiz(HWND(wp.0 as *mut _));
             _ = com(|st| {
                 atualizar(st);
                 st.piscando.remove(&j);
+                if st.mru.contains(&j) {
+                    st.mru.retain(|&x| x != j);
+                    st.mru.insert(0, j);
+                }
                 if let Some(g) = st.grupos.grupo_de(j) {
-                    if g != st.grupos.ativo {
+                    if g != st.grupos.ativo && !st.visao.aberta {
                         st.grupos.trocar(g);
                     }
                     st.grupos.anotar_foco(j);
                 }
                 redesenhar(st);
             });
+            LRESULT(0)
+        }
+        teclado::WM_ALT_TAB => {
+            teclado::mascarar();
+            let volta = wp.0 != 0;
+            _ = com(|st| {
+                if st.visao.aberta {
+                    andar(st, false, if volta { -1 } else { 1 });
+                } else if st.alt_pendente {
+                    let n = st.mru.len().max(1);
+                    st.alt_indice = if volta { (st.alt_indice + n - 1) % n } else { (st.alt_indice + 1) % n };
+                } else if !st.mru.is_empty() {
+                    st.alt_pendente = true;
+                    let n = st.mru.len();
+                    st.alt_indice = if volta { n - 1 } else { 1.min(n - 1) };
+                    MODO_ALT.store(true, Ordering::Relaxed);
+                    SetTimer(Some(h), TIMER_ALT, 160, None);
+                }
+            });
+            LRESULT(0)
+        }
+        WM_TIMER if wp.0 == TIMER_ALT => {
+            _ = KillTimer(Some(h), TIMER_ALT);
+            // Alt ainda apertado: mostra a visão geral com a janela escolhida até aqui
+            if let Some(Some(sel)) = com(|st| {
+                let p = std::mem::take(&mut st.alt_pendente);
+                p.then(|| st.mru.get(st.alt_indice).copied()).flatten()
+            }) {
+                abrir_visao(true, Some(sel));
+            }
+            LRESULT(0)
+        }
+        teclado::WM_ALT_SOLTO => {
+            _ = KillTimer(Some(h), TIMER_ALT);
+            let rapido = com(|st| std::mem::take(&mut st.alt_pendente).then(|| st.mru.get(st.alt_indice).copied()).flatten());
+            match rapido {
+                // toque rápido: vai direto, sem mostrar nada
+                Some(Some(j)) => {
+                    MODO_ALT.store(false, Ordering::Relaxed);
+                    ir_janela(j);
+                }
+                _ => {
+                    if MODO_ALT.load(Ordering::Relaxed) && com(|st| st.visao.aberta) == Some(true) {
+                        escolher_selecao();
+                    }
+                    MODO_ALT.store(false, Ordering::Relaxed);
+                }
+            }
+            LRESULT(0)
+        }
+        teclado::WM_ESC_ALT => {
+            _ = KillTimer(Some(h), TIMER_ALT);
+            _ = com(|st| st.alt_pendente = false);
+            fechar_visao(true);
+            LRESULT(0)
+        }
+        teclado::WM_WIN_TAB => {
+            teclado::mascarar();
+            if com(|st| st.visao.aberta) == Some(true) {
+                fechar_visao(true);
+            } else {
+                abrir_visao(false, Some(primeiro_plano()));
+            }
             LRESULT(0)
         }
         WM_TIMER if wp.0 == TIMER => {
@@ -522,6 +934,200 @@ unsafe extern "system" fn proc_janela(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM)
     }
 }
 
+/// O que fazer depois de soltar o botão na visão geral (fora do acesso ao estado).
+enum Acao {
+    Nada,
+    Ir(usize, Option<isize>),
+    NovoEIr,
+}
+
+unsafe fn proc_visao(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
+    match msg {
+        WM_PAINT => {
+            let mut ps = PAINTSTRUCT::default();
+            let dc = BeginPaint(h, &mut ps);
+            let mut r = RECT::default();
+            _ = GetClientRect(h, &mut r);
+            _ = com(|st| {
+                let c = cena_visao(st, r.right, r.bottom);
+                _ = st.gfx.desenhar_visao(dc, &c);
+            });
+            _ = EndPaint(h, &ps);
+            LRESULT(0)
+        }
+        WM_ERASEBKGND => LRESULT(1),
+        WM_MOUSEMOVE => {
+            let (x, y) = xy(lp);
+            _ = com(|st| {
+                let (fx, fy) = (x as f32, y as f32);
+                let v = &mut st.visao;
+                if let Some(a) = v.arrasto.as_mut() {
+                    a.atual = (x, y);
+                    if !a.ativo && ((x - a.inicio.0).abs() > 6 || (y - a.inicio.1).abs() > 6) {
+                        a.ativo = true;
+                    }
+                    if a.ativo {
+                        v.aplicar_miniaturas();
+                    }
+                }
+                let hv = if v.arrasto.as_ref().is_some_and(|a| a.ativo) { None } else { v.item_em(fx, fy) };
+                let hc = v.cartao_em(fx, fy);
+                if hv != v.hover || hc != v.hover_cartao {
+                    v.hover = hv;
+                    v.hover_cartao = hc;
+                    invalidar(h);
+                }
+            });
+            LRESULT(0)
+        }
+        WM_LBUTTONDOWN => {
+            let (x, y) = xy(lp);
+            _ = SetCapture(h);
+            _ = com(|st| {
+                st.visao.arrasto = st.visao.item_em(x as f32, y as f32).map(|item| visao::Arrasto { item, inicio: (x, y), atual: (x, y), ativo: false });
+            });
+            LRESULT(0)
+        }
+        WM_LBUTTONUP => {
+            let (x, y) = xy(lp);
+            _ = ReleaseCapture();
+            let acao = com(|st| {
+                let (fx, fy) = (x as f32, y as f32);
+                let arrasto = st.visao.arrasto.take();
+                let cartao = st.visao.cartao_em(fx, fy).map(|i| st.visao.cartoes[i].grupo);
+                match arrasto {
+                    Some(a) if a.ativo => {
+                        // soltou a janela num cartão: muda de grupo
+                        let j = st.visao.itens[a.item].hwnd;
+                        match cartao {
+                            Some(Some(g)) => st.grupos.mover(j, g),
+                            Some(None) => {
+                                let g = st.grupos.novo();
+                                st.grupos.mover(j, g);
+                            }
+                            None => {}
+                        }
+                        remontar_visao(st);
+                        redesenhar(st);
+                        Acao::Nada
+                    }
+                    Some(a) => {
+                        let it = &st.visao.itens[a.item];
+                        Acao::Ir(it.grupo, Some(it.hwnd))
+                    }
+                    None => match cartao {
+                        Some(Some(g)) => Acao::Ir(g, None),
+                        Some(None) => Acao::NovoEIr,
+                        None => Acao::Nada,
+                    },
+                }
+            })
+            .unwrap_or(Acao::Nada);
+            match acao {
+                Acao::Ir(g, j) => {
+                    fechar_visao(false);
+                    ir(g, j);
+                }
+                Acao::NovoEIr => {
+                    fechar_visao(false);
+                    if let Some(g) = com(|st| st.grupos.novo()) {
+                        ir(g, None);
+                    }
+                }
+                Acao::Nada => {}
+            }
+            LRESULT(0)
+        }
+        WM_LBUTTONDBLCLK => {
+            let (x, y) = xy(lp);
+            let g = com(|st| {
+                let (fx, fy) = (x as f32, y as f32);
+                st.visao.cartoes.iter().find(|c| fx >= c.cab.left && fx < c.cab.right && fy >= c.cab.top && fy < c.cab.bottom).and_then(|c| c.grupo)
+            });
+            if let Some(Some(g)) = g {
+                comecar_renomear(g);
+            }
+            LRESULT(0)
+        }
+        WM_RBUTTONUP => {
+            let (x, y) = xy(lp);
+            let g = com(|st| st.visao.cartao_em(x as f32, y as f32).and_then(|i| st.visao.cartoes[i].grupo));
+            if let Some(Some(g)) = g {
+                menu_grupo(h, g, cursor(), false);
+            }
+            LRESULT(0)
+        }
+        WM_KEYDOWN | WM_SYSKEYDOWN => {
+            let vk = VIRTUAL_KEY(wp.0 as u16);
+            let shift = GetKeyState(VK_SHIFT.0 as i32) < 0;
+            match vk {
+                VK_ESCAPE => fechar_visao(true),
+                VK_RETURN => escolher_selecao(),
+                VK_LEFT | VK_UP => _ = com(|st| andar(st, true, -1)),
+                VK_RIGHT | VK_DOWN => _ = com(|st| andar(st, true, 1)),
+                VK_TAB => _ = com(|st| andar(st, false, if shift { -1 } else { 1 })),
+                VK_BACK => _ = com(|st| {
+                    st.visao.filtro.pop();
+                    st.visao.aplicar_miniaturas();
+                    invalidar(h);
+                }),
+                _ => return DefWindowProcW(h, msg, wp, lp),
+            }
+            LRESULT(0)
+        }
+        WM_CHAR => {
+            if let Some(c) = char::from_u32(wp.0 as u32).filter(|c| !c.is_control()) {
+                _ = com(|st| {
+                    st.visao.filtro.push(c);
+                    st.visao.aplicar_miniaturas();
+                    // seleção vai para a primeira que casa (na ordem do Alt+Tab)
+                    if !st.visao.selecao.is_some_and(|s| st.visao.casa(s)) {
+                        st.visao.selecao = st.mru.iter().copied().find(|&j| st.visao.casa(j) && st.visao.itens.iter().any(|i| i.hwnd == j));
+                    }
+                    invalidar(h);
+                });
+            }
+            LRESULT(0)
+        }
+        WM_RENOMEAR => {
+            _ = com(|st| {
+                let Some((g, e)) = st.visao.editando.take() else { return };
+                if wp.0 == 1 {
+                    let nome = janelas::titulo(e).trim().to_string();
+                    if !nome.is_empty() && g < st.grupos.lista.len() {
+                        st.grupos.lista[g].nome = nome;
+                    }
+                }
+                _ = DestroyWindow(e);
+                _ = SetFocus(Some(h));
+                redesenhar(st);
+            });
+            LRESULT(0)
+        }
+        WM_CTLCOLOREDIT => {
+            let dc = HDC(wp.0 as *mut _);
+            SetTextColor(dc, COLORREF(0x00FFFFFF));
+            SetBkColor(dc, COLORREF(0x00302C2B));
+            thread_local! {
+                static FUNDO: HBRUSH = unsafe { CreateSolidBrush(COLORREF(0x00302C2B)) };
+            }
+            LRESULT(FUNDO.with(|b| b.0 as isize))
+        }
+        WM_ACTIVATE => {
+            // outra janela tomou o foco (clique em outro lugar, Win): fecha sem roubar de volta
+            if (wp.0 & 0xFFFF) as u32 == WA_INACTIVE {
+                let lp_alvo = HWND(lp.0 as *mut _);
+                let nossa = !lp_alvo.is_invalid() && GetAncestor(lp_alvo, GA_ROOT) == h;
+                if !nossa {
+                    fechar_visao(false);
+                }
+            }
+            DefWindowProcW(h, msg, wp, lp)
+        }
+        _ => DefWindowProcW(h, msg, wp, lp),
+    }
+}
+
 fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
     unsafe {
@@ -550,6 +1156,7 @@ fn main() -> Result<()> {
 
         let instancia = GetModuleHandleW(PCWSTR::null())?;
         let wc = WNDCLASSW {
+            style: CS_DBLCLKS,
             lpfnWndProc: Some(proc_janela),
             hInstance: instancia.into(),
             lpszClassName: CLASSE,
@@ -557,33 +1164,35 @@ fn main() -> Result<()> {
             ..Default::default()
         };
         RegisterClassW(&wc);
-        let barra = CreateWindowExW(
-            WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_NOACTIVATE,
-            CLASSE,
-            TITULO,
-            WS_POPUP,
-            0, 0, 0, 0,
-            None, None, Some(instancia.into()), None,
-        )?;
-        let menus = CreateWindowExW(
-            WS_EX_TOOLWINDOW,
-            CLASSE,
-            w!("barra-menus"),
-            WS_POPUP,
-            0, 0, 0, 0,
-            None, None, Some(instancia.into()), None,
-        )?;
-
+        let criar = |ex: WINDOW_EX_STYLE, titulo: PCWSTR| {
+            CreateWindowExW(ex, CLASSE, titulo, WS_POPUP, 0, 0, 0, 0, None, None, Some(instancia.into()), None)
+        };
+        let barra = criar(WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_NOACTIVATE, TITULO)?;
+        let menus = criar(WS_EX_TOOLWINDOW, w!("barra-menus"))?;
+        let dica = criar(WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_NOACTIVATE | WS_EX_TRANSPARENT, w!("barra-dica"))?;
+        let visao_hwnd = criar(WS_EX_TOOLWINDOW | WS_EX_TOPMOST, w!("barra-visao"))?;
         BARRA.store(barra.0 as isize, Ordering::Relaxed);
+        VISAO.store(visao_hwnd.0 as isize, Ordering::Relaxed);
+        DICA.store(dica.0 as isize, Ordering::Relaxed);
+
+        let atuais = janelas::listar();
         let mut grupos = grupos::Grupos::new();
-        grupos.sincronizar(&janelas::listar());
-        let esconder = sistema::ler(sistema::PREF_ESCONDER) == Some(1);
+        grupos.sincronizar(&atuais);
+        let esconder = sistema::ler(sistema::PREF_ESCONDER) != Some(0);
+        teclado::ALT_TAB.store(sistema::ler(PREF_ALT_TAB) != Some(0), Ordering::Relaxed);
         ESTADO.with_borrow_mut(|e| {
             *e = Some(Estado {
                 barra,
                 menus,
+                dica,
+                dica_texto: String::new(),
+                visao_hwnd,
                 gfx: desenho::Gfx::new().expect("Direct2D"),
                 grupos,
+                visao: visao::Visao { janela: visao_hwnd, ..Default::default() },
+                mru: atuais,
+                alt_pendente: false,
+                alt_indice: 0,
                 alvos: Vec::new(),
                 hover: None,
                 piscando: HashSet::new(),
@@ -601,6 +1210,9 @@ fn main() -> Result<()> {
         appbar::registrar(barra, WM_APPBAR);
         _ = com(posicionar);
         _ = ShowWindow(barra, SW_SHOWNOACTIVATE);
+        if esconder {
+            bandeja::ligar(barra);
+        }
         _ = RegisterShellHookWindow(barra);
         let gancho = SetWinEventHook(
             EVENT_SYSTEM_FOREGROUND,
@@ -614,6 +1226,7 @@ fn main() -> Result<()> {
         if gancho.is_invalid() {
             return Err(windows::core::Error::from_win32());
         }
+        teclado::instalar(barra);
         SetTimer(Some(barra), TIMER, 1000, None);
 
         let mut msg = MSG::default();
@@ -630,13 +1243,15 @@ fn preview(saida: &str) -> Result<()> {
     let (w, h) = (2560, ALTURA as i32);
     let mut gfx = desenho::Gfx::new()?;
     let icone = unsafe { LoadIconW(None, IDI_APPLICATION)? };
-    let janela = |t: &str, ativa: bool, minimizada: bool, piscando: bool| ItemJanela {
+    let janela = |t: &str, ativa: bool, minimizada: bool, piscando: bool, progresso: Option<(u32, f32)>| ItemJanela {
         hwnd: t.len() as isize,
         titulo: t.into(),
         icone,
         ativa,
         minimizada,
         piscando,
+        selo: HICON::default(),
+        progresso,
     };
     let grupo = |n: &str, q: usize, ativo: bool| ItemGrupo { nome: n.into(), qtd: q, ativo };
     let cena = Cena {
@@ -645,14 +1260,15 @@ fn preview(saida: &str) -> Result<()> {
         escala: 1.0,
         grupos: vec![grupo("1", 3, false), grupo("projeto-a", 4, true), grupo("claude", 6, false), grupo("geral", 2, false)],
         janelas: vec![
-            janela("pwsh — projeto-a\\build", true, false, false),
-            janela("pwsh — testes", false, false, false),
-            janela("GitHub — snap-zones e mais um título comprido", false, false, true),
-            janela("Docs", false, true, false),
+            janela("pwsh — projeto-a\\build", true, false, false, None),
+            janela("pwsh — testes", false, false, false, Some((2, 0.6))),
+            janela("GitHub — snap-zones e mais um título comprido", false, false, true, None),
+            janela("Docs", false, true, false, None),
         ],
         hover: Some(Alvo::Grupo(2)),
         hora: "14:32".into(),
         data: "21/10/2026".into(),
+        bandeja: (0..4).map(|i| ItemBandeja { indice: i, icone }).collect(),
     };
     unsafe {
         let dc = CreateCompatibleDC(None);

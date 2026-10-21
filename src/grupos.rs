@@ -250,3 +250,8 @@ impl Grupos {
         self.ativo = 0;
     }
 }
+
+/// Onde a janela estava antes de ser estacionada.
+pub fn posicao_salva(h: isize) -> Option<RECT> {
+    ESTACIONADAS.lock().unwrap().iter().find(|(e, _)| *e == h).map(|(_, r)| *r)
+}
