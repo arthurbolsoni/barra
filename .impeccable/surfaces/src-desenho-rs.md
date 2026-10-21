@@ -21,6 +21,6 @@ STORY: glance up, read which group is active and which window has focus, read th
 
 FIRST VIEWPORT: top strip 26 px. Left: group names (numbers by default) spaced like workspaces, active in accent, empty ones muted; a plus glyph for a new group; then the active group's window icons at 16 px, focused one with a 2 px accent underline. Center: weekday and time. Right: tray icons 16 px, network and volume glyphs.
 
-FORM: pinned by the user (Omarchy Linux); no concept-seed roll, brief-pinned direction. Signature move: the overview renders groups as Hyprland frames, 2 px accent border on the focused frame, sharp corners, gaps.
+FORM: pinned by the user in their words: "quero parecido com o omarchy linux"; no concept-seed roll, the user-pinned direction stands in for the seed key. Overview title is 15 px bold (the one heading above 12 px, to anchor the screen); everything else 12 px. "novo grupo" is a 56 px strip at the right of the overview, not a grid cell. Signature move: the overview renders groups as Hyprland frames, 2 px accent border on the focused frame, sharp corners, gaps.
 
 FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, DESIGN.md, and every shipping raster carrying its provenance

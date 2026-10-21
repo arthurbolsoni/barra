@@ -117,6 +117,15 @@ fn cor(hex: u32, a: f32) -> D2D1_COLOR_F {
     }
 }
 
+/// `a` levado `f` (0..1) na direção de `b`.
+fn mistura(a: u32, b: u32, f: f32) -> u32 {
+    let canal = |s: u32| {
+        let (x, y) = (((a >> s) & 0xFF) as f32, ((b >> s) & 0xFF) as f32);
+        ((x + (y - x) * f).round() as u32) << s
+    };
+    canal(16) | canal(8) | canal(0)
+}
+
 fn ret(left: f32, top: f32, right: f32, bottom: f32) -> D2D_RECT_F {
     D2D_RECT_F { left, top, right, bottom }
 }
@@ -178,6 +187,14 @@ impl Gfx {
         let b = self.pincel(c)?;
         unsafe { self.rt.DrawText(&u, f, &r, &b, D2D1_DRAW_TEXT_OPTIONS_CLIP, DWRITE_MEASURING_MODE_NATURAL) };
         Ok(())
+    }
+
+    /// Glifo da Nerd Font: sem ClearType, que deixa franja colorida nos traços finos.
+    fn glifo(&self, s: &str, f: &IDWriteTextFormat, r: D2D_RECT_F, c: D2D1_COLOR_F) -> Result<()> {
+        unsafe { self.rt.SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE) };
+        let feito = self.texto(s, f, r, c);
+        unsafe { self.rt.SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_CLEARTYPE) };
+        feito
     }
 
     fn largura(&self, s: &str, f: &IDWriteTextFormat) -> Result<f32> {
@@ -277,7 +294,8 @@ impl Gfx {
             let tinta = if g.ativo {
                 cor(t.destaque, 1.0)
             } else if g.qtd == 0 {
-                cor(t.texto_escuro, 1.0)
+                // apagado, mas legível (texto_escuro fica abaixo de 3:1 em vários temas)
+                cor(mistura(t.texto, t.fundo, 0.3), 1.0)
             } else {
                 cor(t.texto, 1.0)
             };
@@ -289,7 +307,7 @@ impl Gfx {
         if hover(Alvo::NovoGrupo) {
             self.preencher(r, realce)?;
         }
-        self.texto(G_MAIS, &f_texto, r, cor(t.texto_escuro, 1.0))?;
+        self.glifo(G_MAIS, &f_texto, r, cor(mistura(t.texto, t.fundo, 0.3), 1.0))?;
         alvos.push((r, Alvo::NovoGrupo));
         x = r.right + 14.0 * s;
 
@@ -306,7 +324,8 @@ impl Gfx {
             }
             let cx = (r.left + r.right) / 2.0;
             let ri = ret(cx - lado / 2.0, meio - lado / 2.0, cx + lado / 2.0, meio + lado / 2.0);
-            self.icone(j.icone, ri, if j.minimizada { 0.4 } else { 1.0 });
+            let apagado = if t.claro { 0.55 } else { 0.4 };
+            self.icone(j.icone, ri, if j.minimizada { apagado } else { 1.0 });
             if !j.selo.is_invalid() {
                 let l = 9.0 * s;
                 self.icone(j.selo, ret(ri.right - l * 0.6, ri.bottom - l * 0.7, ri.right + l * 0.4, ri.bottom + l * 0.3), 1.0);
@@ -340,8 +359,8 @@ impl Gfx {
             self.preencher(rs, realce)?;
         }
         let ms = (rs.left + rs.right) / 2.0;
-        self.texto(G_WIFI, &f_glifo, ret(rs.left, 0.0, ms, h), cor(t.texto, 1.0))?;
-        self.texto(G_VOLUME, &f_glifo, ret(ms, 0.0, rs.right, h), cor(t.texto, 1.0))?;
+        self.glifo(G_WIFI, &f_glifo, ret(rs.left, 0.0, ms, h), cor(t.texto, 1.0))?;
+        self.glifo(G_VOLUME, &f_glifo, ret(ms, 0.0, rs.right, h), cor(t.texto, 1.0))?;
         alvos.push((rs, Alvo::Sistema));
         let mut xb = rs.left - 6.0 * s;
         for ic in c.bandeja.iter().rev() {
@@ -350,7 +369,7 @@ impl Gfx {
                 self.preencher(r, realce)?;
             }
             let cx = (r.left + r.right) / 2.0;
-            let l = 15.0 * s;
+            let l = 16.0 * s;
             self.icone(ic.icone, ret(cx - l / 2.0, meio - l / 2.0, cx + l / 2.0, meio + l / 2.0), 1.0);
             alvos.push((r, Alvo::Bandeja(ic.indice)));
             xb = r.left;
@@ -382,7 +401,7 @@ impl Gfx {
         self.no_dc(dc, w, h, |g| {
             let t = g.tema;
             unsafe { g.rt.Clear(Some(&cor(t.fundo, 1.0))) };
-            g.borda(ret(0.0, 0.0, w as f32, h as f32), cor(t.destaque, 1.0), 1.0 * s)?;
+            g.borda(ret(0.0, 0.0, w as f32, h as f32), cor(t.destaque, 1.0), 2.0 * s)?;
             let f = g.formato(12.0 * s, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_TEXT_ALIGNMENT_CENTER)?;
             g.texto(texto, &f, ret(8.0 * s, 0.0, w as f32 - 8.0 * s, h as f32), cor(t.texto, 1.0))
         })
@@ -398,17 +417,17 @@ impl Gfx {
         let w = c.w as f32;
         let f_titulo = self.formato(15.0 * s, DWRITE_FONT_WEIGHT_BOLD, DWRITE_TEXT_ALIGNMENT_CENTER)?;
         let f_dica = self.formato(12.0 * s, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_TEXT_ALIGNMENT_CENTER)?;
-        let f_nome = self.formato(13.0 * s, DWRITE_FONT_WEIGHT_BOLD, DWRITE_TEXT_ALIGNMENT_LEADING)?;
+        let f_nome = self.formato(12.0 * s, DWRITE_FONT_WEIGHT_BOLD, DWRITE_TEXT_ALIGNMENT_LEADING)?;
         let f_qtd = self.formato(12.0 * s, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_TEXT_ALIGNMENT_TRAILING)?;
-        let f_min = self.formato(11.0 * s, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_TEXT_ALIGNMENT_LEADING)?;
-        let f_novo = self.formato(13.0 * s, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_TEXT_ALIGNMENT_CENTER)?;
+        let f_min = self.formato(12.0 * s, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_TEXT_ALIGNMENT_LEADING)?;
+        let f_novo = self.formato(16.0 * s, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_TEXT_ALIGNMENT_CENTER)?;
 
         unsafe { self.rt.Clear(Some(&cor(t.fundo, 1.0))) };
 
         // topo: a janela escolhida e, embaixo, como usar ou o filtro
         self.texto(&c.titulo, &f_titulo, ret(40.0 * s, 12.0 * s, w - 40.0 * s, 38.0 * s), cor(t.texto_forte, 1.0))?;
         let (dica, tinta) = if c.filtro.is_empty() {
-            ("digite para filtrar · enter abre · arraste para outro grupo · duplo clique renomeia · esc fecha".to_string(), t.texto_escuro)
+            ("digite para filtrar · enter abre · arraste para outro grupo · duplo clique renomeia · esc fecha".to_string(), t.texto)
         } else {
             (format!("filtro: {}", c.filtro), t.destaque)
         };
@@ -427,7 +446,7 @@ impl Gfx {
             };
             if k.novo {
                 self.borda(k.r, cor(borda, 1.0), e)?;
-                self.texto(&format!("{G_MAIS}  novo grupo"), &f_novo, k.r, cor(if k.destino { t.amarelo } else { t.texto_escuro }, 1.0))?;
+                self.glifo(G_MAIS, &f_novo, k.r, cor(if k.destino { t.amarelo } else { t.texto }, 1.0))?;
                 continue;
             }
             self.preencher(k.area, cor(t.fundo_claro, 1.0))?;
@@ -436,7 +455,7 @@ impl Gfx {
             let nome = if k.ativo { t.destaque } else { t.texto };
             self.texto(&k.nome, &f_nome, ret(k.cab.left + pad, k.cab.top, k.cab.right - 110.0 * s, k.cab.bottom), cor(nome, 1.0))?;
             let qtd = if k.qtd == 1 { "1 janela".to_string() } else { format!("{} janelas", k.qtd) };
-            self.texto(&qtd, &f_qtd, ret(k.cab.right - 140.0 * s, k.cab.top, k.cab.right - pad, k.cab.bottom), cor(t.texto_escuro, 1.0))?;
+            self.texto(&qtd, &f_qtd, ret(k.cab.right - 140.0 * s, k.cab.top, k.cab.right - pad, k.cab.bottom), cor(t.texto, 1.0))?;
         }
 
         for j in &c.janelas {
@@ -447,7 +466,7 @@ impl Gfx {
                 let lado = (14.0 * s).min(j.r.bottom - j.r.top - 4.0 * s);
                 let ri = ret(j.r.left + 7.0 * s, (j.r.top + j.r.bottom - lado) / 2.0, j.r.left + 7.0 * s + lado, (j.r.top + j.r.bottom + lado) / 2.0);
                 self.icone(j.icone, ri, 0.8 * a);
-                self.texto(&j.titulo, &f_min, ret(ri.right + 6.0 * s, j.r.top, j.r.right - 6.0 * s, j.r.bottom), cor(t.texto_escuro, a))?;
+                self.texto(&j.titulo, &f_min, ret(ri.right + 6.0 * s, j.r.top, j.r.right - 6.0 * s, j.r.bottom), cor(t.texto, a))?;
             }
             // borda por fora, como a do Hyprland: a miniatura cobre o lado de dentro
             let (tinta, m) = if j.selecionada {

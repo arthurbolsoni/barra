@@ -121,14 +121,17 @@ impl Visao {
 
         let mw = (monitor.right - monitor.left) as f32;
         let mh = (monitor.bottom - monitor.top) as f32;
-        let n = grupos.lista.len() + 1;
+        let n = grupos.lista.len();
+        // gaps do Hyprland: 10 por fora, 5 entre os quadros
         let topo = 70.0 * s;
-        let pad = 20.0 * s;
-        let vao = 10.0 * s;
+        let pad = 10.0 * s;
+        let vao = 5.0 * s;
         let cab = 32.0 * s;
         // faixa no pé do cartão para as minimizadas (a miniatura do DWM cobriria o que estiver embaixo dela)
         let pe = 30.0 * s;
-        let (aw, ah) = (w - 2.0 * pad, h - topo - pad);
+        // "novo grupo" é uma faixa estreita na direita, não um quadro inteiro
+        let faixa_novo = 56.0 * s;
+        let (aw, ah) = (w - 2.0 * pad - faixa_novo - vao, h - topo - pad);
 
         // quantas colunas deixam as miniaturas maiores
         let mut melhor = (1usize, 0.0f32);
@@ -147,8 +150,9 @@ impl Visao {
         let ch = mh * k + cab + pe;
         let total_w = cw * cols as f32 + vao * (cols - 1) as f32;
         let total_h = ch * linhas as f32 + vao * (linhas - 1) as f32;
-        let x0 = (w - total_w) / 2.0;
+        let x0 = pad + (aw - total_w) / 2.0;
         let y0 = topo + (ah - total_h) / 2.0;
+        let r_novo = ret(w - pad - faixa_novo, y0, w - pad, y0 + total_h);
 
         let z = ordem_z();
         for i in 0..n {
@@ -157,8 +161,8 @@ impl Visao {
             let y = y0 + l as f32 * (ch + vao);
             let r = ret(x, y, x + cw, y + ch);
             let cab_r = ret(x, y, x + cw, y + cab);
-            let area = ret(x + 10.0 * s, y + cab, x + cw - 10.0 * s, y + ch - pe);
-            let grupo = (i < grupos.lista.len()).then_some(i);
+            let area = ret(x + 5.0 * s, y + cab, x + cw - 5.0 * s, y + ch - pe);
+            let grupo = Some(i);
             if let Some(g) = grupo {
                 let ka = (area.right - area.left) / mw;
                 let ka = ka.min((area.bottom - area.top) / mh);
@@ -202,6 +206,7 @@ impl Visao {
             }
             self.cartoes.push(Cartao { grupo, r, cab: cab_r, area });
         }
+        self.cartoes.push(Cartao { grupo: None, r: r_novo, cab: r_novo, area: r_novo });
 
         for it in &self.itens {
             if it.minimizada {

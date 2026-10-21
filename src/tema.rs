@@ -2,8 +2,6 @@
 
 pub struct Tema {
     pub nome: &'static str,
-    /// Tema claro (fundo claro): ainda sem uso no desenho, que lê só os papéis de cor.
-    #[allow(dead_code)]
     pub claro: bool,
     pub fundo: u32,
     pub fundo_claro: u32,
