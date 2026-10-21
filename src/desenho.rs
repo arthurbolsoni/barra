@@ -451,7 +451,7 @@ impl Gfx {
         let (dica, tinta) = if c.filtro.is_empty() && c.lista {
             ("tab próxima · shift+tab anterior · setas andam · solte o alt para abrir · esc cancela".to_string(), t.texto)
         } else if c.filtro.is_empty() {
-            ("setas andam · enter abre · 1–9 grupo · + novo · delete apaga o grupo · shift+←/→ muda a janela de grupo · f2 renomeia · digite para filtrar · esc fecha".to_string(), t.texto)
+            ("setas andam · enter abre · 1–9 grupo · + novo · - ou delete apaga o grupo · shift+←/→ muda a janela de grupo · f2 renomeia · digite para filtrar · esc fecha".to_string(), t.texto)
         } else {
             (format!("filtro: {}", c.filtro), t.destaque)
         };

@@ -382,6 +382,7 @@ fn novo_grupo_na_visao(st: &mut Estado) {
     redesenhar(st);
 }
 
+/// Apaga o grupo da seleção (janela ou quadro); as janelas dele vão para o grupo anterior.fn apagar_grupo_escolhido(st: &mut Estado) {    let porjanela = st.visao.selecao.and_then(|j| st.grupos.grupo_de(j));    let g = porjanela.or_else(|| st.visao.cartao_sel.and_then(|c| st.visao.cartoes.get(c)).and_then(|c| c.grupo));    if let Some(g) = g {        st.grupos.apagar(g);        st.visao.cartao_sel = None;        remontar_visao(st);        redesenhar(st);    }}
 /// Setas no Win+Tab: vai para o vizinho mais perto naquela direção, entre as janelas que
 /// casam com o filtro, os grupos vazios e o "novo grupo".
 fn navegar(st: &mut Estado, dx: f32, dy: f32) {
@@ -1196,16 +1197,7 @@ unsafe fn proc_visao(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                 VK_DOWN => _ = com(|st| navegar(st, 0.0, 1.0)),
                 VK_TAB => _ = com(|st| andar(st, false, if shift { -1 } else { 1 })),
                 // Delete: apaga o grupo escolhido (as janelas dele vão para o grupo anterior)
-                VK_DELETE if !lista => _ = com(|st| {
-                    let porjanela = st.visao.selecao.and_then(|j| st.grupos.grupo_de(j));
-                    let g = porjanela.or_else(|| st.visao.cartao_sel.and_then(|c| st.visao.cartoes.get(c)).and_then(|c| c.grupo));
-                    if let Some(g) = g {
-                        st.grupos.apagar(g);
-                        st.visao.cartao_sel = None;
-                        remontar_visao(st);
-                        redesenhar(st);
-                    }
-                }),
+                VK_DELETE if !lista => _ = com(apagar_grupo_escolhido),
                 VK_F2 => {
                     let g = com(|st| {
                         let porjanela = st.visao.selecao.and_then(|j| st.grupos.grupo_de(j));
@@ -1237,6 +1229,11 @@ unsafe fn proc_visao(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                         fechar_visao(false);
                         ir(d as usize - 1, None);
                     }
+                    return LRESULT(0);
+                }
+                // - (e Shift+-, que dá _) apaga o grupo escolhido, como o Delete
+                if c == '-' || c == '_' {
+                    _ = com(apagar_grupo_escolhido);
                     return LRESULT(0);
                 }
                 if c == '+' {
