@@ -150,9 +150,11 @@ impl Visao {
         let ch = mh * k + cab + pe;
         let total_w = cw * cols as f32 + vao * (cols - 1) as f32;
         let total_h = ch * linhas as f32 + vao * (linhas - 1) as f32;
-        let x0 = pad + (aw - total_w) / 2.0;
+        let x0 = pad + ((w - 2.0 * pad) - (total_w + vao + faixa_novo)) / 2.0;
         let y0 = topo + (ah - total_h) / 2.0;
-        let r_novo = ret(w - pad - faixa_novo, y0, w - pad, y0 + total_h);
+        // faixa colada no último quadro, com o mesmo gap de dentro
+        let xn = x0 + total_w + vao;
+        let r_novo = ret(xn, y0, xn + faixa_novo, y0 + total_h);
 
         let z = ordem_z();
         for i in 0..n {

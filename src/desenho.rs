@@ -446,7 +446,11 @@ impl Gfx {
             };
             if k.novo {
                 self.borda(k.r, cor(borda, 1.0), e)?;
-                self.glifo(G_MAIS, &f_novo, k.r, cor(if k.destino { t.amarelo } else { t.texto }, 1.0))?;
+                let tinta = cor(if k.destino { t.amarelo } else { t.texto }, 1.0);
+                let cy = (k.r.top + k.r.bottom) / 2.0;
+                self.glifo(G_MAIS, &f_novo, ret(k.r.left, cy - 34.0 * s, k.r.right, cy - 8.0 * s), tinta)?;
+                self.texto("novo", &f_dica, ret(k.r.left, cy - 4.0 * s, k.r.right, cy + 12.0 * s), tinta)?;
+                self.texto("grupo", &f_dica, ret(k.r.left, cy + 12.0 * s, k.r.right, cy + 28.0 * s), tinta)?;
                 continue;
             }
             self.preencher(k.area, cor(t.fundo_claro, 1.0))?;
