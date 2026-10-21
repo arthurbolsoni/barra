@@ -84,6 +84,8 @@ pub struct CartaoV {
     pub hover: bool,
     /// Janela sendo arrastada por cima.
     pub destino: bool,
+    /// Escolhido pelo teclado.
+    pub selecionado: bool,
 }
 
 pub struct JanelaV {
@@ -449,7 +451,7 @@ impl Gfx {
         let (dica, tinta) = if c.filtro.is_empty() && c.lista {
             ("tab próxima · shift+tab anterior · setas andam · solte o alt para abrir · esc cancela".to_string(), t.texto)
         } else if c.filtro.is_empty() {
-            ("digite para filtrar · enter abre · arraste para outro grupo · duplo clique renomeia · esc fecha".to_string(), t.texto)
+            ("setas andam · enter abre · 1–9 grupo · + novo · delete apaga o grupo · shift+←/→ muda a janela de grupo · f2 renomeia · digite para filtrar · esc fecha".to_string(), t.texto)
         } else {
             (format!("filtro: {}", c.filtro), t.destaque)
         };
@@ -459,6 +461,8 @@ impl Gfx {
         for k in &c.cartoes {
             let borda = if k.destino {
                 t.amarelo
+            } else if k.selecionado {
+                t.texto_forte
             } else if k.ativo {
                 t.destaque
             } else if k.hover {

@@ -210,6 +210,10 @@ fn ir(grupo: usize, janela: Option<isize>) {
     .flatten();
     if let Some(h) = janela.or(foco) {
         forcar_primeiro_plano(hwnd(h));
+    } else {
+        // grupo vazio: o foco vai para a área de trabalho; se ficasse na janela de antes (agora
+        // estacionada), a barra veria ela em foco e voltaria para o grupo dela
+        forcar_primeiro_plano(unsafe { GetShellWindow() });
     }
 }
 
@@ -352,12 +356,84 @@ fn fechar_visao(voltar: bool) {
 }
 
 fn escolher_selecao() {
-    let sel = com(|st| st.visao.selecao).flatten();
-    fechar_visao(false);
-    if let Some(h) = sel {
-        ir_janela(h);
+    let sel = com(|st| (st.visao.selecao, st.visao.cartao_sel.and_then(|c| st.visao.cartoes.get(c)).map(|c| c.grupo)));
+    match sel {
+        // quadro de grupo vazio: vai para ele
+        Some((_, Some(Some(g)))) => {
+            fechar_visao(false);
+            ir(g, None);
+        }
+        // "novo grupo": cria e continua na visão geral
+        Some((_, Some(None))) => _ = com(novo_grupo_na_visao),
+        Some((Some(h), None)) => {
+            fechar_visao(false);
+            ir_janela(h);
+        }
+        _ => {}
     }
 }
+
+/// Cria um grupo vazio, refaz a visão geral e deixa o quadro dele escolhido.
+fn novo_grupo_na_visao(st: &mut Estado) {
+    let g = st.grupos.novo();
+    remontar_visao(st);
+    st.visao.selecao = None;
+    st.visao.cartao_sel = st.visao.cartoes.iter().position(|c| c.grupo == Some(g));
+    redesenhar(st);
+}
+
+/// Setas no Win+Tab: vai para o vizinho mais perto naquela direção, entre as janelas que
+/// casam com o filtro, os grupos vazios e o "novo grupo".
+fn navegar(st: &mut Estado, dx: f32, dy: f32) {
+    let v = &st.visao;
+    let centro = |r: &windows::Win32::Graphics::Direct2D::Common::D2D_RECT_F| ((r.left + r.right) / 2.0, (r.top + r.bottom) / 2.0);
+    let mut pontos: Vec<((f32, f32), Option<isize>, Option<usize>)> =
+        v.itens.iter().filter(|i| v.casa(i.hwnd)).map(|i| (centro(&i.r), Some(i.hwnd), None)).collect();
+    for (ci, c) in v.cartoes.iter().enumerate() {
+        if c.grupo.is_none_or(|g| st.grupos.lista.get(g).is_some_and(|x| x.janelas.is_empty())) {
+            pontos.push((centro(&c.r), None, Some(ci)));
+        }
+    }
+    let atual = v
+        .selecao
+        .and_then(|s| v.itens.iter().find(|i| i.hwnd == s).map(|i| centro(&i.r)))
+        .or_else(|| v.cartao_sel.and_then(|c| v.cartoes.get(c)).map(|c| centro(&c.r)));
+    let escolha = match atual {
+        None => pontos.first().map(|p| (p.1, p.2)),
+        Some((ax, ay)) => pontos
+            .iter()
+            .filter_map(|&((px, py), j, c)| {
+                let principal = (px - ax) * dx + (py - ay) * dy;
+                if principal <= 1.0 {
+                    return None;
+                }
+                let lado = if dx != 0.0 { (py - ay).abs() } else { (px - ax).abs() };
+                Some((principal + 2.0 * lado, j, c))
+            })
+            .min_by(|a, b| a.0.total_cmp(&b.0))
+            .map(|p| (p.1, p.2)),
+    };
+    if let Some((j, c)) = escolha {
+        st.visao.selecao = j;
+        st.visao.cartao_sel = c;
+        invalidar(st.visao_hwnd);
+    }
+}
+
+/// Shift+setas: leva a janela escolhida para o grupo ao lado (depois do último, um novo).
+fn mover_para_vizinho(st: &mut Estado, passo: i32) {
+    let Some(h) = st.visao.selecao else { return };
+    let Some(g) = st.grupos.grupo_de(h) else { return };
+    let destino = g as i32 + passo;
+    if destino < 0 {
+        return;
+    }
+    let destino = if destino as usize >= st.grupos.lista.len() { st.grupos.novo() } else { destino as usize };
+    st.grupos.mover(h, destino);
+    remontar_visao(st);
+    redesenhar(st);
+}
+
 
 /// Anda `passo` na lista (MRU ou espacial) a partir da seleção.
 fn andar(st: &mut Estado, espacial: bool, passo: i32) {
@@ -373,6 +449,7 @@ fn andar(st: &mut Estado, espacial: bool, passo: i32) {
     let i = st.visao.selecao.and_then(|s| lista.iter().position(|&h| h == s)).map(|i| i as i32).unwrap_or(-1);
     let novo = if i < 0 { if passo > 0 { 0 } else { n - 1 } } else { (i + passo).rem_euclid(n) };
     st.visao.selecao = Some(lista[novo as usize]);
+    st.visao.cartao_sel = None;
     invalidar(st.visao_hwnd);
 }
 
@@ -399,6 +476,7 @@ fn cena_visao(st: &mut Estado, w: i32, h: i32) -> CenaVisao {
                 novo: c.grupo.is_none(),
                 hover: st.visao.hover_cartao == Some(i),
                 destino: destino == Some(i),
+                selecionado: st.visao.cartao_sel == Some(i),
             }
         })
         .collect();
@@ -904,6 +982,7 @@ unsafe fn proc_barra(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
             fechar_visao(true);
             LRESULT(0)
         }
+teclado::WM_GRUPO_VIZINHO => {            teclado::mascarar();            let destino = com(|st| {                let a = st.grupos.ativo;                if wp.0 == 1 { (a + 1 < st.grupos.lista.len()).then_some(a + 1) } else { a.checked_sub(1) }            });            if let Some(Some(g)) = destino {                fechar_visao(false);                ir(g, None);            }            LRESULT(0)        }
         teclado::WM_WIN_TAB => {
             teclado::mascarar();
             if com(|st| st.visao.aberta) == Some(true) {
@@ -1101,12 +1180,41 @@ unsafe fn proc_visao(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
         WM_KEYDOWN | WM_SYSKEYDOWN => {
             let vk = VIRTUAL_KEY(wp.0 as u16);
             let shift = GetKeyState(VK_SHIFT.0 as i32) < 0;
+            let lista = com(|st| st.visao.lista).unwrap_or(false);
             match vk {
                 VK_ESCAPE => fechar_visao(true),
                 VK_RETURN => escolher_selecao(),
-                VK_LEFT | VK_UP => _ = com(|st| andar(st, true, -1)),
-                VK_RIGHT | VK_DOWN => _ = com(|st| andar(st, true, 1)),
+                // Alt+Tab: as setas andam na fila
+                VK_LEFT | VK_UP if lista => _ = com(|st| andar(st, true, -1)),
+                VK_RIGHT | VK_DOWN if lista => _ = com(|st| andar(st, true, 1)),
+                // Win+Tab: Shift+←/→ leva a janela para o grupo ao lado; setas andam para qualquer lado
+                VK_LEFT if shift => _ = com(|st| mover_para_vizinho(st, -1)),
+                VK_RIGHT if shift => _ = com(|st| mover_para_vizinho(st, 1)),
+                VK_LEFT => _ = com(|st| navegar(st, -1.0, 0.0)),
+                VK_RIGHT => _ = com(|st| navegar(st, 1.0, 0.0)),
+                VK_UP => _ = com(|st| navegar(st, 0.0, -1.0)),
+                VK_DOWN => _ = com(|st| navegar(st, 0.0, 1.0)),
                 VK_TAB => _ = com(|st| andar(st, false, if shift { -1 } else { 1 })),
+                // Delete: apaga o grupo escolhido (as janelas dele vão para o grupo anterior)
+                VK_DELETE if !lista => _ = com(|st| {
+                    let porjanela = st.visao.selecao.and_then(|j| st.grupos.grupo_de(j));
+                    let g = porjanela.or_else(|| st.visao.cartao_sel.and_then(|c| st.visao.cartoes.get(c)).and_then(|c| c.grupo));
+                    if let Some(g) = g {
+                        st.grupos.apagar(g);
+                        st.visao.cartao_sel = None;
+                        remontar_visao(st);
+                        redesenhar(st);
+                    }
+                }),
+                VK_F2 => {
+                    let g = com(|st| {
+                        let porjanela = st.visao.selecao.and_then(|j| st.grupos.grupo_de(j));
+                        porjanela.or_else(|| st.visao.cartao_sel.and_then(|c| st.visao.cartoes.get(c)).and_then(|c| c.grupo))
+                    });
+                    if let Some(Some(g)) = g {
+                        comecar_renomear(g);
+                    }
+                }
                 VK_BACK => _ = com(|st| {
                     st.visao.filtro.pop();
                     st.visao.aplicar_miniaturas();
@@ -1118,18 +1226,34 @@ unsafe fn proc_visao(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
         }
         WM_CHAR => {
             // a tecla de máscara (0xE8) do Alt/Win+Tab e espaços no começo não entram no filtro
-            let vazio = com(|st| st.visao.filtro.is_empty()).unwrap_or(true);
-            if let Some(c) = char::from_u32(wp.0 as u32).filter(|c| !c.is_control() && !(vazio && c.is_whitespace()) && (*c as u32) < 0xE000) {
-                _ = com(|st| {
-                    st.visao.filtro.push(c);
-                    st.visao.aplicar_miniaturas();
-                    // seleção vai para a primeira que casa (na ordem do Alt+Tab)
-                    if !st.visao.selecao.is_some_and(|s| st.visao.casa(s)) {
-                        st.visao.selecao = st.mru.iter().copied().find(|&j| st.visao.casa(j) && st.visao.itens.iter().any(|i| i.hwnd == j));
+            let (vazio, lista) = com(|st| (st.visao.filtro.is_empty(), st.visao.lista)).unwrap_or((true, false));
+            let Some(c) = char::from_u32(wp.0 as u32).filter(|c| !c.is_control() && !(vazio && c.is_whitespace()) && (*c as u32) < 0xE000) else {
+                return LRESULT(0);
+            };
+            // Win+Tab, sem filtro: 1–9 vai para o grupo, + cria um grupo
+            if vazio && !lista {
+                if let Some(d) = c.to_digit(10).filter(|d| *d >= 1) {
+                    if com(|st| (d as usize) <= st.grupos.lista.len()) == Some(true) {
+                        fechar_visao(false);
+                        ir(d as usize - 1, None);
                     }
-                    invalidar(h);
-                });
+                    return LRESULT(0);
+                }
+                if c == '+' {
+                    _ = com(novo_grupo_na_visao);
+                    return LRESULT(0);
+                }
             }
+            _ = com(|st| {
+                st.visao.filtro.push(c);
+                st.visao.aplicar_miniaturas();
+                // seleção vai para a primeira que casa (na ordem do Alt+Tab)
+                if !st.visao.selecao.is_some_and(|s| st.visao.casa(s)) {
+                    st.visao.selecao = st.mru.iter().copied().find(|&j| st.visao.casa(j) && st.visao.itens.iter().any(|i| i.hwnd == j));
+                    st.visao.cartao_sel = None;
+                }
+                invalidar(h);
+            });
             LRESULT(0)
         }
         WM_RENOMEAR => {

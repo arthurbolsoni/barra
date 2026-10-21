@@ -59,6 +59,8 @@ pub struct Visao {
     pub editando: Option<(usize, HWND)>,
     /// Aberta pelo Alt+Tab: todas as janelas lado a lado, sem sobreposição.
     pub lista: bool,
+    /// Quadro escolhido pelo teclado (grupo vazio ou "novo grupo"), no lugar de uma janela.
+    pub cartao_sel: Option<usize>,
 }
 
 fn ret(left: f32, top: f32, right: f32, bottom: f32) -> D2D_RECT_F {

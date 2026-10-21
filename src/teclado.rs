@@ -15,6 +15,8 @@ pub const WM_ALT_TAB: u32 = WM_APP + 20;
 pub const WM_WIN_TAB: u32 = WM_APP + 21;
 pub const WM_ALT_SOLTO: u32 = WM_APP + 22;
 pub const WM_ESC_ALT: u32 = WM_APP + 23;
+/// Ctrl+Win+←/→: grupo anterior/seguinte (wparam 1 = seguinte).
+pub const WM_GRUPO_VIZINHO: u32 = WM_APP + 24;
 
 /// Para onde postar.
 pub static DESTINO: AtomicIsize = AtomicIsize::new(0);
@@ -63,6 +65,11 @@ unsafe extern "system" fn gancho(code: i32, wp: WPARAM, lp: LPARAM) -> LRESULT {
         let desce = wp.0 as u32 == WM_KEYDOWN || wp.0 as u32 == WM_SYSKEYDOWN;
         let vk = VIRTUAL_KEY(k.vkCode as u16);
         if !injetada {
+            // Ctrl+Win+←/→: no lugar da troca de área de trabalho virtual do Windows
+            if (vk == VK_LEFT || vk == VK_RIGHT) && desce && apertada(VK_CONTROL) && (apertada(VK_LWIN) || apertada(VK_RWIN)) && !tela_cheia_na_frente() {
+                postar(WM_GRUPO_VIZINHO, (vk == VK_RIGHT) as usize);
+                return LRESULT(1);
+            }
             if vk == VK_TAB && desce && !apertada(VK_CONTROL) {
                 let alt = k.flags.0 & LLKHF_ALTDOWN.0 != 0;
                 let win = apertada(VK_LWIN) || apertada(VK_RWIN);
@@ -142,6 +149,23 @@ pub fn forcar_primeiro_plano(h: HWND) {
         _ = SetForegroundWindow(h);
         if ligou {
             _ = AttachThreadInput(nosso, deles, false);
+        }
+        if GetForegroundWindow() == h {
+            return;
+        }
+        // último recurso: um Alt simulado libera a troca de foco (o Windows deixa trocar quando
+        // vê o Alt, por causa dos menus); a tecla vai e volta antes de qualquer janela reagir
+        let alt = |up: bool| INPUT {
+            r#type: INPUT_KEYBOARD,
+            Anonymous: INPUT_0 { ki: KEYBDINPUT { wVk: VK_MENU, dwFlags: if up { KEYEVENTF_KEYUP } else { KEYBD_EVENT_FLAGS(0) }, ..Default::default() } },
+        };
+        let ja_apertado = apertada(VK_MENU);
+        if !ja_apertado {
+            SendInput(&[alt(false)], size_of::<INPUT>() as i32);
+        }
+        _ = SetForegroundWindow(h);
+        if !ja_apertado {
+            SendInput(&[alt(true)], size_of::<INPUT>() as i32);
         }
     }
 }
