@@ -130,7 +130,7 @@ A barra é a Waybar do Omarchy (Hyprland) levada para o Windows 11: uma faixa de
 
 A densidade é de ferramenta de desenvolvedor: tudo em 12 px, peso como único eixo de hierarquia dentro da barra, estado marcado por cor do tema e por linhas de 2 px. A visão geral reproduz os quadros do Hyprland: cada grupo é um quadro de borda reta de 2 px com as miniaturas ao vivo do DWM no lugar onde as janelas ficam na tela, separado dos vizinhos por vãos de 10 px.
 
-O mesmo vocabulário sai da barra e chega às janelas de outros programas: barra de título na cor de fundo do tema, texto na cor de texto, borda de destaque na janela em foco e apagada nas outras, cantos retos, e o glifo `>_` do tema como ícone dos terminais.
+O mesmo vocabulário sai da barra e chega às janelas de outros programas: barra de título na cor de fundo do tema, só com o texto na cor de texto, sem ícone e sem os botões de minimizar, maximizar e fechar; borda de destaque na janela em foco e apagada nas outras; cantos retos.
 
 **Key Characteristics:**
 - Faixa de 26 px no topo, como AppBar; todas as medidas multiplicadas pela escala de DPI.
@@ -285,6 +285,8 @@ Texto de 12 px em `texto`, centralizado, itens no formato "Tecla: ação" separa
 
 ### Moldura das outras janelas
 Aplicada pelo DWM, sem injeção: modo escuro conforme o tema, barra de título `fundo`, texto `texto`, borda `destaque` na janela em primeiro plano e `mudo` nas outras, cantos retos. Terminais recebem como ícone da barra de título o glifo `>_` (`f120`) em negrito, na cor `texto`, gerado em 16 e 32 px. Tudo volta ao padrão do Windows ao desligar a opção ou sair.
+
+**Barra de título sem botões** (opção "Ocultar os botões das barras de título", ligada por padrão e independente do tema das molduras). Como no Hyprland, não há minimizar, maximizar nem fechar: a barra tira o `WS_SYSMENU` da janela e o DWM deixa de desenhar os botões e o ícone, então o glifo `>_` só aparece com a opção desligada. O título fica para arrastar; duplo clique maximiza e restaura (o `WS_MAXIMIZEBOX` fica), Alt+F4 fecha, e a janela minimiza pelo clique no botão dela na barra. Sem o menu de sistema, Alt+Espaço e o clique direito no título não abrem nada. Vale só para a barra de título desenhada pelo Windows (área do programa começando abaixo da altura de título): navegadores, Windows Terminal, Explorer e apps da loja desenham os próprios botões e ficam como estão; programas com mais privilégio que a barra e janelas travadas também ficam de fora. Desligar a opção ou sair devolve o `WS_SYSMENU`.
 
 ### Menus
 Menus de contexto do Win32 (teclado, submenus e posição do Windows), com os itens desenhados pela barra no tema.
