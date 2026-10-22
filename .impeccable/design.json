@@ -1,0 +1,338 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-21T22:24:14-03:00",
+  "title": "Design System: barra",
+  "extensions": {
+    "colorMeta": {
+      "fundo": {
+        "role": "neutral",
+        "displayName": "Fundo",
+        "canonical": "oklch(22.6% 0.021 280.5)",
+        "tonalRamp": [
+          "#090a14",
+          "#23242f",
+          "#40414d",
+          "#5f606e",
+          "#80818f",
+          "#a2a4b3",
+          "#c6c8d7",
+          "#ebedfd"
+        ]
+      },
+      "fundo-claro": {
+        "role": "neutral",
+        "displayName": "Fundo claro",
+        "canonical": "oklch(28.2% 0.036 274.7)",
+        "tonalRamp": [
+          "#07091a",
+          "#202436",
+          "#3c4155",
+          "#5b6076",
+          "#7c8198",
+          "#9ea4bc",
+          "#c2c8e1",
+          "#e7edff"
+        ]
+      },
+      "selecao": {
+        "role": "neutral",
+        "displayName": "Seleção",
+        "canonical": "oklch(30.6% 0.037 273.2)",
+        "tonalRamp": [
+          "#07091a",
+          "#1f2437",
+          "#3b4156",
+          "#5a6077",
+          "#7b8199",
+          "#9da4bd",
+          "#c1c8e2",
+          "#e6edff"
+        ]
+      },
+      "mudo": {
+        "role": "neutral",
+        "displayName": "Mudo",
+        "canonical": "oklch(40.9% 0.055 274.3)",
+        "tonalRamp": [
+          "#060722",
+          "#1d223f",
+          "#39405f",
+          "#575f81",
+          "#7880a4",
+          "#9aa3c8",
+          "#bec7ed",
+          "#e3edff"
+        ]
+      },
+      "texto": {
+        "role": "neutral",
+        "displayName": "Texto",
+        "canonical": "oklch(76.7% 0.054 275.5)",
+        "tonalRamp": [
+          "#060721",
+          "#1e223f",
+          "#3a405f",
+          "#585f80",
+          "#7980a3",
+          "#9ba3c7",
+          "#bfc7ed",
+          "#e4ecff"
+        ]
+      },
+      "texto-apagado": {
+        "role": "neutral",
+        "displayName": "Texto apagado",
+        "canonical": "oklch(61.9% 0.044 275.9)",
+        "tonalRamp": [
+          "#07081d",
+          "#1f233a",
+          "#3b405a",
+          "#5a5f7b",
+          "#7b819d",
+          "#9da3c1",
+          "#c1c7e7",
+          "#e6edff"
+        ],
+        "derivedFrom": "mistura(texto, fundo, 0.3)"
+      },
+      "texto-escuro": {
+        "role": "neutral",
+        "displayName": "Texto escuro",
+        "canonical": "oklch(49.6% 0.068 274.4)",
+        "tonalRamp": [
+          "#050527",
+          "#1c2146",
+          "#373f66",
+          "#555e88",
+          "#7680ac",
+          "#98a2d0",
+          "#bbc7f6",
+          "#e0ecff"
+        ]
+      },
+      "texto-forte": {
+        "role": "neutral",
+        "displayName": "Texto forte",
+        "canonical": "oklch(84.6% 0.061 274.8)",
+        "tonalRamp": [
+          "#060624",
+          "#1d2242",
+          "#383f62",
+          "#575f84",
+          "#7780a7",
+          "#99a3cc",
+          "#bdc7f2",
+          "#e2ecff"
+        ]
+      },
+      "destaque": {
+        "role": "primary",
+        "displayName": "Destaque",
+        "canonical": "oklch(71.9% 0.132 264.2)",
+        "tonalRamp": [
+          "#01003c",
+          "#031a64",
+          "#1c3b87",
+          "#3a5dab",
+          "#597fd1",
+          "#7ba3f8",
+          "#9ec8ff",
+          "#c6eeff"
+        ]
+      },
+      "vermelho": {
+        "role": "secondary",
+        "displayName": "Vermelho",
+        "canonical": "oklch(72.3% 0.159 10.3)",
+        "tonalRamp": [
+          "#2c0002",
+          "#5a0012",
+          "#80002e",
+          "#a72c4c",
+          "#ce526c",
+          "#f7768e",
+          "#ff9ab1",
+          "#ffcddc"
+        ]
+      },
+      "amarelo": {
+        "role": "secondary",
+        "displayName": "Amarelo",
+        "canonical": "oklch(78.4% 0.106 75.4)",
+        "tonalRamp": [
+          "#220000",
+          "#411800",
+          "#613700",
+          "#835700",
+          "#a7782f",
+          "#cb9b54",
+          "#f1c078",
+          "#ffe59d"
+        ]
+      },
+      "verde": {
+        "role": "secondary",
+        "displayName": "Verde",
+        "canonical": "oklch(79.5% 0.139 130.1)",
+        "tonalRamp": [
+          "#001100",
+          "#092f00",
+          "#274f00",
+          "#457000",
+          "#66922c",
+          "#87b652",
+          "#abdb77",
+          "#d4ffa9"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "headline": {
+        "displayName": "Título da visão geral",
+        "purpose": "A janela escolhida, no alto da visão geral."
+      },
+      "title": {
+        "displayName": "Ativo",
+        "purpose": "Grupo ativo na barra e nome do grupo no cartão."
+      },
+      "body": {
+        "displayName": "Texto",
+        "purpose": "Grupos, relógio, dica, atalhos, contagens e rótulos."
+      },
+      "label-cartao": {
+        "displayName": "Criar grupo",
+        "purpose": "Rótulo do cartão de novo grupo."
+      },
+      "glifo-sistema": {
+        "displayName": "Glifo de sistema",
+        "purpose": "Rede, volume e glifos da bandeja."
+      },
+      "glifo-janela": {
+        "displayName": "Glifo de janela",
+        "purpose": "Glifo no lugar do ícone de Gerenciador de Tarefas, terminais e AutoHotkey."
+      }
+    },
+    "shadows": [],
+    "motion": [],
+    "breakpoints": []
+  },
+  "components": [
+    {
+      "name": "Barra",
+      "kind": "nav",
+      "refersTo": "barra",
+      "description": "Faixa de 26 px no topo: grupos, ícones das janelas do grupo ativo, relógio no centro, bandeja e sistema à direita.",
+      "html": "<div class=\"ds-barra\"><span class=\"ds-grupo ds-grupo-ativo\">1</span><span class=\"ds-grupo\">2</span><span class=\"ds-grupo ds-grupo-vazio\">3</span><span class=\"ds-grupo ds-mais\">+</span><span class=\"ds-sep\"></span><span class=\"ds-janela ds-janela-foco\"><i></i></span><span class=\"ds-janela\"><i></i></span><span class=\"ds-relogio\">terça-feira, 20:25</span><span class=\"ds-tray\"><i></i></span><span class=\"ds-sistema\"><i></i><i></i></span></div>",
+      "css": ".ds-barra{display:flex;align-items:stretch;height:26px;background:#1a1b26;color:#a9b1d6;font-family:'JetBrainsMono Nerd Font',monospace;font-size:12px;padding:0 6px;position:relative}.ds-grupo{display:flex;align-items:center;padding:0 7px;min-width:7px}.ds-grupo:hover{background:#24283b}.ds-grupo-ativo{color:#7aa2f7;font-weight:700}.ds-grupo-ativo:hover{background:transparent}.ds-grupo-vazio,.ds-mais{color:#7e84a1}.ds-mais{width:24px;padding:0;justify-content:center}.ds-sep{width:14px}.ds-janela,.ds-tray{width:28px;display:flex;align-items:center;justify-content:center;position:relative}.ds-tray{width:24px;margin-left:auto;margin-right:6px}.ds-janela i,.ds-tray i{width:16px;height:16px;background:#a9b1d6;display:block}.ds-janela:hover,.ds-tray:hover,.ds-sistema:hover{background:#24283b}.ds-janela-foco::after{content:'';position:absolute;left:4px;right:4px;bottom:0;height:2px;background:#7aa2f7}.ds-relogio{position:absolute;left:50%;top:0;bottom:0;transform:translateX(-50%);display:flex;align-items:center;padding:0 8px}.ds-relogio:hover{background:#24283b}.ds-sistema{width:56px;display:flex;align-items:center;justify-content:space-around}.ds-sistema i{width:14px;height:14px;background:#a9b1d6;display:block}"
+    },
+    {
+      "name": "Grupo (workspace)",
+      "kind": "chip",
+      "refersTo": "grupo",
+      "description": "Nome do grupo como texto puro; ativo em destaque e negrito, vazio apagado, hover com fundo claro.",
+      "html": "<div class=\"ds-g-wrap\"><span class=\"ds-g ds-g-ativo\">1</span><span class=\"ds-g\">web</span><span class=\"ds-g ds-g-vazio\">3</span></div>",
+      "css": ".ds-g-wrap{display:flex;height:26px;background:#1a1b26;font-family:'JetBrainsMono Nerd Font',monospace;font-size:12px}.ds-g{display:flex;align-items:center;padding:0 7px;color:#a9b1d6}.ds-g:hover{background:#24283b}.ds-g-ativo{color:#7aa2f7;font-weight:700}.ds-g-ativo:hover{background:transparent}.ds-g-vazio{color:#7e84a1}"
+    },
+    {
+      "name": "Botão de janela",
+      "kind": "button",
+      "refersTo": "botao-janela",
+      "description": "Célula de 28 px só com ícone de 16 px; foco com linha de destaque, piscando em amarelo, progresso no alto, minimizada apagada.",
+      "html": "<div class=\"ds-bj-wrap\"><button class=\"ds-bj ds-bj-foco\"><i></i></button><button class=\"ds-bj ds-bj-pisca\"><i></i></button><button class=\"ds-bj ds-bj-prog\"><i></i></button><button class=\"ds-bj ds-bj-min\"><i></i></button></div>",
+      "css": ".ds-bj-wrap{display:flex;height:26px;background:#1a1b26}.ds-bj{width:28px;height:26px;border:0;border-radius:0;background:transparent;position:relative;display:flex;align-items:center;justify-content:center;padding:0}.ds-bj i{width:16px;height:16px;background:#a9b1d6;display:block}.ds-bj:hover{background:#24283b}.ds-bj:focus-visible{outline:2px solid #7aa2f7;outline-offset:-2px}.ds-bj-foco::after,.ds-bj-pisca::after{content:'';position:absolute;left:4px;right:4px;bottom:0;height:2px;background:#7aa2f7}.ds-bj-pisca{background:rgba(224,175,104,.28)}.ds-bj-pisca::after{background:#e0af68}.ds-bj-prog::before{content:'';position:absolute;left:4px;right:4px;top:0;height:2px;background:linear-gradient(90deg,#9ece6a 60%,#292e42 60%)}.ds-bj-min i{opacity:.4}"
+    },
+    {
+      "name": "Dica",
+      "kind": "custom",
+      "refersTo": "dica",
+      "description": "Tooltip 6 px abaixo da barra: fundo do tema, borda de 2 px em destaque, texto de 12 px centralizado.",
+      "html": "<div class=\"ds-dica\">Grupo 2: 3 janelas</div>",
+      "css": ".ds-dica{display:inline-flex;align-items:center;height:26px;padding:0 11px;max-width:662px;background:#1a1b26;color:#a9b1d6;border:2px solid #7aa2f7;border-radius:0;box-sizing:border-box;font-family:'JetBrainsMono Nerd Font',monospace;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}"
+    },
+    {
+      "name": "Cartão de grupo",
+      "kind": "card",
+      "refersTo": "cartao-grupo",
+      "description": "Quadro da visão geral: cabeçalho de 32 px com nome e contagem, área de miniaturas em fundo claro, pé de 30 px para as minimizadas; borda de 2 px pela prioridade de estado.",
+      "html": "<div class=\"ds-cartao ds-cartao-ativo\"><div class=\"ds-cab\"><b>1</b><span>3 janelas</span></div><div class=\"ds-area\"><div class=\"ds-quadro ds-quadro-sel\"></div><div class=\"ds-quadro\"></div></div><div class=\"ds-pe\"><span class=\"ds-faixa-min\">Docs</span></div></div>",
+      "css": ".ds-cartao{width:320px;background:#1a1b26;border:2px solid #414868;border-radius:0;box-sizing:border-box;font-family:'JetBrainsMono Nerd Font',monospace;font-size:12px;color:#a9b1d6;display:flex;flex-direction:column}.ds-cartao:hover{border-color:#565f89}.ds-cartao-ativo,.ds-cartao-ativo:hover{border-color:#7aa2f7}.ds-cab{height:32px;display:flex;align-items:center;justify-content:space-between;padding:0 12px}.ds-cartao-ativo .ds-cab b{color:#7aa2f7}.ds-area{height:120px;margin:0 10px;background:#24283b;position:relative}.ds-quadro{position:absolute;left:14px;top:14px;width:120px;height:80px;background:#414868;outline:1px solid #414868}.ds-quadro+.ds-quadro{left:150px}.ds-quadro:hover{outline:2px solid #a9b1d6}.ds-quadro-sel{outline:2px solid #7aa2f7}.ds-pe{height:30px;display:flex;align-items:center;padding:0 10px}.ds-faixa-min{height:22px;width:120px;background:#292e42;display:flex;align-items:center;padding:0 7px;outline:1px solid #414868}"
+    },
+    {
+      "name": "Cartão Criar grupo",
+      "kind": "card",
+      "refersTo": "cartao-criar-grupo",
+      "description": "Último cartão da grade, do mesmo tamanho dos outros, só borda e o rótulo de 13 px; amarelo como destino de arrasto.",
+      "html": "<div class=\"ds-novo\" tabindex=\"0\">+&nbsp;&nbsp;Criar grupo</div>",
+      "css": ".ds-novo{width:320px;height:182px;display:flex;align-items:center;justify-content:center;background:#1a1b26;color:#a9b1d6;border:2px solid #414868;border-radius:0;box-sizing:border-box;font-family:'JetBrainsMono Nerd Font',monospace;font-size:13px}.ds-novo:hover{border-color:#565f89}.ds-novo:focus-visible{border-color:#c0caf5;outline:none}"
+    },
+    {
+      "name": "Quadro do Alt+Tab",
+      "kind": "custom",
+      "refersTo": "rotulo-alt-tab",
+      "description": "Célula da lista do Alt+Tab: miniatura com borda por fora e rótulo de 26 px com ícone, título e grupo.",
+      "html": "<div class=\"ds-alt\" tabindex=\"0\"><div class=\"ds-alt-min\"></div><div class=\"ds-alt-rot\"><i></i><span class=\"ds-alt-tit\">pwsh</span><span class=\"ds-alt-grp\">2</span></div></div>",
+      "css": ".ds-alt{width:240px;background:#1a1b26;padding:4px;font-family:'JetBrainsMono Nerd Font',monospace;font-size:12px;outline:none}.ds-alt-min{height:140px;background:#414868;outline:1px solid #414868}.ds-alt:hover .ds-alt-min{outline:2px solid #a9b1d6}.ds-alt:focus-visible .ds-alt-min{outline:2px solid #7aa2f7}.ds-alt:focus-visible .ds-alt-tit{color:#c0caf5}.ds-alt-rot{height:26px;display:flex;align-items:center;gap:7px;padding-top:4px}.ds-alt-rot i{width:16px;height:16px;background:#a9b1d6;flex:none}.ds-alt-tit{flex:1;color:#a9b1d6;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.ds-alt-grp{color:#7e84a1}"
+    }
+  ],
+  "narrative": {
+    "northStar": "A Waybar transplantada",
+    "overview": "A barra é a Waybar do Omarchy (Hyprland) levada para o Windows 11: uma faixa de 26 px no alto do monitor, informação como texto e glifos da JetBrainsMono Nerd Font, cores tiradas do tema Omarchy escolhido pelo usuário. Não há botão em forma de pílula, cantos arredondados, sombra, título de janela na barra nem botão Iniciar. A barra é quieta; a visão geral (Win+Tab e Alt+Tab) concentra a informação.\n\nA densidade é de ferramenta de desenvolvedor: tudo em 12 px, peso como único eixo de hierarquia dentro da barra, estado marcado por cor do tema e por linhas de 2 px. A visão geral reproduz os quadros do Hyprland: cada grupo é um quadro de borda reta de 2 px com as miniaturas ao vivo do DWM no lugar onde as janelas ficam na tela, separado dos vizinhos por vãos de 10 px.\n\nO mesmo vocabulário sai da barra e chega às janelas de outros programas: barra de título na cor de fundo do tema, texto na cor de texto, borda de destaque na janela em foco e apagada nas outras, cantos retos, e o glifo `>_` do tema como ícone dos terminais.",
+    "keyCharacteristics": [
+      "Faixa de 26 px no topo, como AppBar; todas as medidas multiplicadas pela escala de DPI.",
+      "Uma única família tipográfica (JetBrainsMono Nerd Font) para texto e ícones de sistema.",
+      "Cores exclusivamente por papel de tema; 23 temas do Omarchy selecionáveis, padrão tokyo-night.",
+      "Zero arredondamento; bordas de 2 px no lugar de sombra.",
+      "Sem animação: os estados trocam na hora.",
+      "Textos em português formal (pt-BR)."
+    ],
+    "rules": [
+      {
+        "name": "A Regra do Papel de Tema",
+        "body": "Toda cor desenhada vem de um papel do `Tema` ativo ou de uma mistura entre dois papéis (`mistura`). Hex literal no desenho não entra.",
+        "section": "colors"
+      },
+      {
+        "name": "A Regra do Apagado Legível",
+        "body": "O estado \"apagado\" usa `texto` misturado 30% com `fundo`, não `texto_escuro`, que fica abaixo de 3:1 sobre o fundo em vários temas. Glifo de janela minimizada usa a mistura de 50%.",
+        "section": "colors"
+      },
+      {
+        "name": "A Regra dos Três Estados",
+        "body": "Amarelo é atenção, verde é progresso, vermelho é erro. Nenhuma das três aparece como decoração.",
+        "section": "colors"
+      },
+      {
+        "name": "A Regra da Fonte Única",
+        "body": "Texto, número e ícone de sistema saem da JetBrainsMono Nerd Font. O peso negrito é o sinal de \"ativo\"; o tamanho só sobe no título da visão geral.",
+        "section": "typography"
+      },
+      {
+        "name": "A Regra do Glifo Monocromático",
+        "body": "Glifos da Nerd Font (`f067` mais, `f05a9` rede, `f057e` volume, `f120` terminal, `f11c` teclado, `f0e4` Gerenciador de Tarefas) são desenhados numa cor de papel do tema, nunca coloridos. Eles substituem o ícone colorido apenas do Gerenciador de Tarefas, dos terminais (Windows Terminal, conhost, OpenConsole, wt, pwsh, powershell, cmd) e do AutoHotkey; os outros programas mantêm o próprio ícone.",
+        "section": "typography"
+      },
+      {
+        "name": "A Regra da Borda no Lugar da Sombra",
+        "body": "Separação e foco são bordas retas de 2 px (1 px em quadro de janela em repouso). Sombra, brilho e desfoque não entram.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "**Tire** toda cor de um papel do `Tema` ativo e confira a tela em pelo menos um tema claro (catppuccin-latte, flexoki-light, lupine, rose-pine, white).",
+      "**Use** JetBrainsMono Nerd Font em 12 px para texto novo, com negrito para \"ativo\"; o único tamanho maior é o título de 15 px da visão geral.",
+      "**Marque** foco e seleção com `destaque` em linha ou borda de 2 px.",
+      "**Use** `texto` misturado 30% com `fundo` para estado apagado.",
+      "**Multiplique** toda medida pela escala de DPI.",
+      "**Escreva** rótulos em português formal, com contagem por extenso no zero (\"Nenhuma janela\") e singular no um (\"1 janela\")."
+    ],
+    "donts": [
+      "**Não arredonde** cantos nem adicione sombra, brilho ou desfoque.",
+      "**Não ponha** título de janela na barra; botão de janela é só ícone.",
+      "**Não ponha** logotipo do Windows ou botão Iniciar na barra.",
+      "**Não desenhe** botões em forma de pílula na barra; grupos e itens são texto ou ícone sobre o fundo, com realce só no hover.",
+      "**Não use** `texto_escuro` para texto apagado.",
+      "**Não pinte** glifos da Nerd Font fora dos papéis do tema, nem troque por glifo o ícone de programas fora da lista de `janelas::glifo`.",
+      "**Não use** amarelo, verde ou vermelho como decoração."
+    ]
+  }
+}
