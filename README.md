@@ -15,7 +15,7 @@ Só as janelas do grupo ativo ficam na tela. As dos outros grupos ficam estacion
 | Rede | painel de rede e Bluetooth | | |
 | Volume | painel de volume | | sobe/desce 2% (clique do meio: mudo) |
 | Relógio | notificações e calendário (Win+N) | | |
-| Espaço vazio | | visão geral, tema nas janelas, ocultar os botões das barras de título (fecha com Alt+F4), esconder a barra do Windows, Alt+Tab abre a visão geral, iniciar com o Windows, juntar tudo num grupo, sair | |
+| Espaço vazio | | visão geral, esconder a barra do Windows, Alt+Tab abre a visão geral, iniciar com o Windows, juntar tudo num grupo, sair | |
 
 - Janela nova entra no grupo ativo. Ao abrir a barra, tudo o que está aberto vai para o grupo 1.
 - Janela de outro grupo que vem para a frente troca para o grupo dela.

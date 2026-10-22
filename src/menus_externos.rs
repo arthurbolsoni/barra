@@ -1,5 +1,5 @@
 //! Menus Win32 dos outros programas (bandeja, clique direito, menu de sistema, barra de menus
-//! clássica) no tema. A barra instala ganchos globais e o Windows carrega a barra_menus.dll em
+//! clássica) e botões da barra de título no tema. A barra instala ganchos globais e o Windows carrega a barra_menus.dll em
 //! cada programa com janela; a DLL faz o resto lá dentro (ver menus/src/lib.rs).
 //! Só alcança programas de 64 bits que não rodam como administrador.
 //!
@@ -78,8 +78,8 @@ fn avisar_todos() {
 }
 
 /// Cores na ordem que a DLL espera: fundo, fundo_claro, selecao, mudo, texto, texto_forte,
-/// destaque, apagado (texto misturado 30% com o fundo, como na barra).
-fn cores(t: &Tema) -> [u32; 8] {
+/// destaque, apagado (texto misturado 30% com o fundo, como na barra), vermelho.
+fn cores(t: &Tema) -> [u32; 9] {
     let mistura = |a: u32, b: u32, f: f32| {
         let canal = |s: u32| {
             let (x, y) = (((a >> s) & 0xFF) as f32, ((b >> s) & 0xFF) as f32);
@@ -87,7 +87,7 @@ fn cores(t: &Tema) -> [u32; 8] {
         };
         canal(16) | canal(8) | canal(0)
     };
-    [t.fundo, t.fundo_claro, t.selecao, t.mudo, t.texto, t.texto_forte, t.destaque, mistura(t.texto, t.fundo, 0.3)]
+    [t.fundo, t.fundo_claro, t.selecao, t.mudo, t.texto, t.texto_forte, t.destaque, mistura(t.texto, t.fundo, 0.3), t.vermelho]
 }
 
 /// Liga ou troca o tema. Chamado a cada atualização da barra; só age quando algo mudou.

@@ -1,19 +1,13 @@
 //! Molduras das outras janelas no tema, como no Hyprland: barra de título na cor de fundo,
 //! borda de destaque na janela em foco e apagada nas outras, cantos retos. Tudo pelo DWM
 //! (DwmSetWindowAttribute vale para janela de outro processo), sem injetar nada.
-//!
-//! À parte, a barra de título sem os botões de minimizar, maximizar e fechar (no Hyprland não
-//! há botões): sai o WS_SYSMENU, e o DWM deixa de desenhar os botões e o ícone. O título fica
-//! para arrastar; duplo clique continua maximizando (WS_MAXIMIZEBOX fica) e Alt+F4 fechando.
 
 use std::cell::RefCell;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::ffi::c_void;
 
 use windows::core::{w, PCWSTR};
-use windows::Win32::Foundation::{HWND, LPARAM, POINT, RECT, WPARAM};
-use windows::Win32::Graphics::Gdi::ClientToScreen;
-use windows::Win32::UI::HiDpi::{GetDpiForWindow, GetSystemMetricsForDpi};
+use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
 use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::Win32::Graphics::Dwm::*;
 
@@ -23,8 +17,6 @@ use crate::tema::Tema;
 
 /// Preferência: molduras das janelas no tema (padrão: sim).
 pub const PREF: PCWSTR = w!("Molduras");
-/// Preferência: barras de título sem os botões (padrão: sim).
-pub const PREF_BOTOES: PCWSTR = w!("OcultarBotoes");
 /// Volta a cor ao padrão do Windows (DWMWA_COLOR_DEFAULT).
 const COR_PADRAO: u32 = 0xFFFF_FFFF;
 
@@ -41,18 +33,10 @@ struct Aplicada {
 struct Molduras {
     ligadas: bool,
     janelas: HashMap<isize, Aplicada>,
-    sem_botoes: bool,
-    /// Janelas de onde a barra tirou o WS_SYSMENU, para devolver.
-    sem_menu: HashSet<isize>,
 }
 
 thread_local! {
-    static M: RefCell<Molduras> = RefCell::new(Molduras {
-        ligadas: sistema::ler(PREF) != Some(0),
-        janelas: HashMap::new(),
-        sem_botoes: sistema::ler(PREF_BOTOES) != Some(0),
-        sem_menu: HashSet::new(),
-    });
+    static M: RefCell<Molduras> = RefCell::new(Molduras { ligadas: sistema::ler(PREF) != Some(0), janelas: HashMap::new() });
 }
 
 /// 0xRRGGBB do tema para COLORREF (0x00BBGGRR).
@@ -91,46 +75,6 @@ fn trocar_icone(h: HWND, grande: isize, pequeno: isize) -> (isize, isize) {
     }
 }
 
-/// Barra de título desenhada pelo Windows: estilo de título e a área do programa começando
-/// abaixo dela. Navegadores, Windows Terminal, Explorer e apps da loja estendem a área do
-/// programa até o alto e desenham os próprios botões; ficam de fora.
-fn titulo_do_windows(h: HWND, estilo: isize) -> bool {
-    let titulo = WS_CAPTION.0 as isize;
-    if estilo & titulo != titulo || unsafe { IsIconic(h) }.as_bool() {
-        return false;
-    }
-    let mut r = RECT::default();
-    let mut cliente = POINT::default();
-    unsafe {
-        if GetWindowRect(h, &mut r).is_err() || !ClientToScreen(h, &mut cliente).as_bool() {
-            return false;
-        }
-        cliente.y - r.top >= GetSystemMetricsForDpi(SM_CYCAPTION, GetDpiForWindow(h))
-    }
-}
-
-/// Liga ou desliga o WS_SYSMENU e faz o DWM redesenhar a moldura. Programa travado fica de
-/// fora (a troca de estilo espera a janela); falha em programa que roda como administrador.
-fn menu_de_sistema(h: HWND, sim: bool) -> bool {
-    unsafe {
-        if IsHungAppWindow(h).as_bool() {
-            return false;
-        }
-        let estilo = GetWindowLongPtrW(h, GWL_STYLE);
-        let menu = WS_SYSMENU.0 as isize;
-        let novo = if sim { estilo | menu } else { estilo & !menu };
-        if novo == estilo {
-            return true;
-        }
-        SetWindowLongPtrW(h, GWL_STYLE, novo);
-        if GetWindowLongPtrW(h, GWL_STYLE) != novo {
-            return false;
-        }
-        _ = SetWindowPos(h, None, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED | SWP_ASYNCWINDOWPOS);
-        true
-    }
-}
-
 fn devolver(h: HWND, a: &Aplicada) {
     definir(h, DWMWA_CAPTION_COLOR, COR_PADRAO);
     definir(h, DWMWA_TEXT_COLOR, COR_PADRAO);
@@ -148,26 +92,10 @@ pub fn ligadas() -> bool {
 
 /// Liga ou desliga; desligar devolve as molduras do Windows na hora.
 pub fn ligar(sim: bool) {
-    M.with_borrow_mut(|m| {
-        m.ligadas = sim;
-        if !sim {
-            devolver_molduras(m);
-        }
-    });
-}
-
-pub fn botoes_ocultos() -> bool {
-    M.with_borrow(|m| m.sem_botoes)
-}
-
-/// Oculta ou mostra os botões das barras de título; mostrar devolve na hora.
-pub fn ocultar_botoes(sim: bool) {
-    M.with_borrow_mut(|m| {
-        m.sem_botoes = sim;
-        if !sim {
-            devolver_botoes(m);
-        }
-    });
+    M.with_borrow_mut(|m| m.ligadas = sim);
+    if !sim {
+        restaurar();
+    }
 }
 
 /// Pinta as janelas novas, troca a borda de quem ganhou ou perdeu o foco e repinta tudo
@@ -175,16 +103,6 @@ pub fn ocultar_botoes(sim: bool) {
 /// `icones`: o glifo de terminal do tema, (grande, pequeno), para a barra de título dos terminais.
 pub fn sincronizar(tema: &'static Tema, atuais: &[isize], frente: isize, icones: Option<(HICON, HICON)>) {
     M.with_borrow_mut(|m| {
-        m.sem_menu.retain(|&j| existe(j));
-        if m.sem_botoes {
-            // confere a cada passada: o console põe o menu de volta em algumas trocas de modo
-            for &j in atuais {
-                let estilo = unsafe { GetWindowLongPtrW(hwnd(j), GWL_STYLE) };
-                if estilo & WS_SYSMENU.0 as isize != 0 && titulo_do_windows(hwnd(j), estilo) && menu_de_sistema(hwnd(j), false) {
-                    m.sem_menu.insert(j);
-                }
-            }
-        }
         if !m.ligadas {
             return;
         }
@@ -211,29 +129,16 @@ pub fn sincronizar(tema: &'static Tema, atuais: &[isize], frente: isize, icones:
     });
 }
 
-fn devolver_molduras(m: &mut Molduras) {
-    for (j, a) in m.janelas.drain() {
-        if existe(j) {
-            devolver(hwnd(j), &a);
-        }
-    }
-}
-
-fn devolver_botoes(m: &mut Molduras) {
-    for j in m.sem_menu.drain() {
-        if existe(j) {
-            menu_de_sistema(hwnd(j), true);
-        }
-    }
-}
-
-/// Saída, desligamento e pânico: molduras e botões do Windows de volta em todas as janelas.
+/// Saída, desligamento e pânico: molduras do Windows de volta em todas as janelas pintadas.
 pub fn restaurar() {
-    // no pânico o estado pode estar emprestado: aí não dá, e cor e botões ficam para trás
+    // no pânico o estado pode estar emprestado: aí não dá, e só a cor fica para trás
     _ = M.try_with(|m| {
         if let Ok(mut m) = m.try_borrow_mut() {
-            devolver_molduras(&mut m);
-            devolver_botoes(&mut m);
+            for (j, a) in m.janelas.drain() {
+                if existe(j) {
+                    devolver(hwnd(j), &a);
+                }
+            }
         }
     });
 }

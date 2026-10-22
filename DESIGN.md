@@ -79,6 +79,17 @@ components:
     size: "{spacing.icone}"
   botao-janela-hover:
     backgroundColor: "{colors.fundo-claro}"
+  botao-titulo:
+    backgroundColor: "{colors.fundo}"
+    textColor: "{colors.texto}"
+    typography: "{typography.glifo-sistema}"
+    width: "{spacing.celula-janela}"
+  botao-titulo-hover:
+    backgroundColor: "{colors.fundo-claro}"
+    textColor: "{colors.texto-forte}"
+  botao-titulo-fechar-hover:
+    backgroundColor: "{colors.fundo-claro}"
+    textColor: "{colors.vermelho}"
   item-bandeja:
     textColor: "{colors.texto}"
     typography: "{typography.glifo-sistema}"
@@ -130,7 +141,7 @@ A barra é a Waybar do Omarchy (Hyprland) levada para o Windows 11: uma faixa de
 
 A densidade é de ferramenta de desenvolvedor: tudo em 12 px, peso como único eixo de hierarquia dentro da barra, estado marcado por cor do tema e por linhas de 2 px. A visão geral reproduz os quadros do Hyprland: cada grupo é um quadro de borda reta de 2 px com as miniaturas ao vivo do DWM no lugar onde as janelas ficam na tela, separado dos vizinhos por vãos de 10 px.
 
-O mesmo vocabulário sai da barra e chega às janelas de outros programas: barra de título na cor de fundo do tema, só com o texto na cor de texto, sem ícone e sem os botões de minimizar, maximizar e fechar; borda de destaque na janela em foco e apagada nas outras; cantos retos.
+O mesmo vocabulário sai da barra e chega às janelas de outros programas: barra de título na cor de fundo do tema, com o título na cor de texto e os botões de minimizar, maximizar e fechar em glifos do tema, sem ícone; borda de destaque na janela em foco e apagada nas outras; cantos retos.
 
 **Key Characteristics:**
 - Faixa de 26 px no topo, como AppBar; todas as medidas multiplicadas pela escala de DPI.
@@ -150,7 +161,7 @@ A paleta é um conjunto de papéis, não de valores: os hex abaixo são os do te
 ### Secondary
 - **Amarelo** (`amarelo`): atenção. Janela piscando (fundo da célula em 28% de opacidade e linha inferior de 2 px), cartão de destino durante o arrasto (borda e texto do "Criar grupo") e progresso pausado.
 - **Verde** (`verde`): progresso normal do ITaskbarList3.
-- **Vermelho** (`vermelho`): progresso em erro.
+- **Vermelho** (`vermelho`): progresso em erro, volume mudo e glifo do botão de fechar sob o mouse.
 
 ### Neutral
 - **Fundo** (`fundo`): fundo da barra, da dica e da visão geral; barra de título das janelas tematizadas.
@@ -286,7 +297,9 @@ Texto de 12 px em `texto`, centralizado, itens no formato "Tecla: ação" separa
 ### Moldura das outras janelas
 Aplicada pelo DWM, sem injeção: modo escuro conforme o tema, barra de título `fundo`, texto `texto`, borda `destaque` na janela em primeiro plano e `mudo` nas outras, cantos retos. Terminais recebem como ícone da barra de título o glifo `>_` (`f120`) em negrito, na cor `texto`, gerado em 16 e 32 px. Tudo volta ao padrão do Windows ao desligar a opção ou sair.
 
-**Barra de título sem botões** (opção "Ocultar os botões das barras de título", ligada por padrão e independente do tema das molduras). Como no Hyprland, não há minimizar, maximizar nem fechar: a barra tira o `WS_SYSMENU` da janela e o DWM deixa de desenhar os botões e o ícone, então o glifo `>_` só aparece com a opção desligada. O título fica para arrastar; duplo clique maximiza e restaura (o `WS_MAXIMIZEBOX` fica), Alt+F4 fecha, e a janela minimiza pelo clique no botão dela na barra. Sem o menu de sistema, Alt+Espaço e o clique direito no título não abrem nada. Vale só para a barra de título desenhada pelo Windows (área do programa começando abaixo da altura de título): navegadores, Windows Terminal, Explorer e apps da loja desenham os próprios botões e ficam como estão; programas com mais privilégio que a barra e janelas travadas também ficam de fora. Desligar a opção ou sair devolve o `WS_SYSMENU`.
+**Botões da barra de título.** Minimizar, maximizar (restaurar, com a janela maximizada) e fechar viram os glifos do menu de sistema no tema (`f2d1`, `f2d0`, `f2d2`, `f00d`), em 14 px, cada um numa célula de 28 px, colados à borda direita e da borda de cima até a área do programa. Fundo `fundo`, o mesmo da barra de título; glifo em `texto` com a janela ativa e em `texto-apagado` sem ela. Sob o mouse, fundo `fundo-claro` e glifo `texto-forte`, e o fechar com o glifo em `vermelho`; apertado, fundo `selecao`. Sem dica.
+
+A `barra_menus.dll` faz isso dentro do programa: tira o `WS_SYSMENU`, e o DWM deixa de desenhar os botões e o ícone (o glifo `>_` dos terminais não aparece); por cima fica uma janela da própria janela (owned popup), que acompanha posição, tamanho, foco e minimização. O clique manda o mesmo `WM_SYSCOMMAND` dos botões do Windows; duplo clique no título maximiza e Alt+F4 fecha. Sem o menu de sistema, Alt+Espaço e o clique direito no título não abrem nada. Vale para a barra de título desenhada pelo Windows nas janelas com botão na barra (área do programa começando abaixo da altura de título): navegadores, Windows Terminal e Explorer desenham os próprios botões e ficam como estão, e os programas que a DLL não alcança (32 bits, administrador) ficam com os do Windows. Desligar o tema das janelas ou sair devolve os botões do Windows.
 
 ### Menus
 Menus de contexto do Win32 (teclado, submenus e posição do Windows), com os itens desenhados pela barra no tema.

@@ -1232,7 +1232,6 @@ const MENU_SAIR: usize = 23;
 const MENU_ALT_TAB: usize = 24;
 const MENU_VISAO: usize = 25;
 const MENU_MOLDURAS: usize = 26;
-const MENU_BOTOES: usize = 27;
 const MENU_MOVER: usize = 100;
 /// Entrada de submenu (não é escolhida; só abre o submenu).
 const MENU_SUBMENU: usize = 1;
@@ -1315,7 +1314,6 @@ fn clicar_direito(alvo: Option<Alvo>) {
             let Some(m) = montar_menu(&[
                 (MENU_VISAO, "Abrir a visão geral	Win+Tab".into(), false, true),
                 (MENU_MOLDURAS, "Aplicar o tema às janelas e aos menus dos outros programas".into(), molduras::ligadas(), true),
-                (MENU_BOTOES, "Ocultar os botões das barras de título".into(), molduras::botoes_ocultos(), true),
                 (0, String::new(), false, true),
                 (MENU_ESCONDER, "Ocultar a barra de tarefas do Windows".into(), esconder, true),
                 (MENU_ALT_TAB, "Usar Alt+Tab para a visão geral".into(), alt_tab, true),
@@ -1345,12 +1343,6 @@ fn clicar_direito(alvo: Option<Alvo>) {
                     let ligar = !molduras::ligadas();
                     sistema::gravar(molduras::PREF, Some(ligar as u32));
                     molduras::ligar(ligar);
-                    _ = com(atualizar);
-                }
-                MENU_BOTOES => {
-                    let ocultar = !molduras::botoes_ocultos();
-                    sistema::gravar(molduras::PREF_BOTOES, Some(ocultar as u32));
-                    molduras::ocultar_botoes(ocultar);
                     _ = com(atualizar);
                 }
                 MENU_ESCONDER => {

@@ -8,7 +8,10 @@
 //!   tema, e voltam ao normal no WM_UNINITMENUPOPUP;
 //! - janela do menu: borda de 2 px em destaque, cantos retos, sem sombra;
 //! - barra de menus clássica ("Arquivo  Editar…"): pelas mensagens WM_UAHDRAWMENU e
-//!   WM_UAHDRAWMENUITEM, que o Windows manda para a janela desenhar a faixa.
+//!   WM_UAHDRAWMENUITEM, que o Windows manda para a janela desenhar a faixa;
+//! - botões da barra de título (minimizar, maximizar, fechar): sai o WS_SYSMENU, e o DWM deixa
+//!   de desenhar os dele; no lugar fica uma janela da própria janela (owned popup), com os
+//!   glifos do tema.
 //!
 //! Menus que o próprio programa desenha (itens owner-draw ou com bitmap de callback, como os do
 //! Explorer) ficam só com o modo escuro. Nada aqui pode entrar em pânico: um pânico dentro de
@@ -24,10 +27,10 @@ use windows::Win32::Foundation::*;
 use windows::Win32::Graphics::Dwm::*;
 use windows::Win32::Graphics::Gdi::*;
 use windows::Win32::System::LibraryLoader::*;
-use windows::Win32::UI::Controls::{DRAWITEMSTRUCT, MEASUREITEMSTRUCT, ODS_CHECKED, ODS_DISABLED, ODS_GRAYED, ODS_HOTLIGHT, ODS_INACTIVE, ODS_NOACCEL, ODS_SELECTED, ODT_MENU};
-use windows::Win32::UI::HiDpi::GetDpiForWindow;
-use windows::Win32::UI::Input::KeyboardAndMouse::GetActiveWindow;
-use windows::Win32::UI::Shell::{DefSubclassProc, SetWindowSubclass};
+use windows::Win32::UI::Controls::{DRAWITEMSTRUCT, MEASUREITEMSTRUCT, WM_MOUSELEAVE, ODS_CHECKED, ODS_DISABLED, ODS_GRAYED, ODS_HOTLIGHT, ODS_INACTIVE, ODS_NOACCEL, ODS_SELECTED, ODT_MENU};
+use windows::Win32::UI::HiDpi::{GetDpiForWindow, GetSystemMetricsForDpi, GetWindowDpiAwarenessContext, SetThreadDpiAwarenessContext};
+use windows::Win32::UI::Input::KeyboardAndMouse::{GetActiveWindow, ReleaseCapture, SetCapture, TrackMouseEvent, TME_LEAVE, TRACKMOUSEEVENT};
+use windows::Win32::UI::Shell::{DefSubclassProc, RemoveWindowSubclass, SetWindowSubclass};
 use windows::Win32::UI::WindowsAndMessaging::*;
 
 // ---------- o que a barra pede (memória comum a todos os processos) ----------
@@ -41,9 +44,9 @@ pub const CLARO: u32 = 3;
 static MODO: AtomicU32 = AtomicU32::new(PADRAO);
 
 /// Cores do tema, 0xRRGGBB: fundo, fundo_claro, selecao, mudo, texto, texto_forte, destaque,
-/// apagado (texto misturado 30% com o fundo).
+/// apagado (texto misturado 30% com o fundo), vermelho.
 #[link_section = ".barra"]
-static CORES: [AtomicU32; 8] = [const { AtomicU32::new(0) }; 8];
+static CORES: [AtomicU32; 9] = [const { AtomicU32::new(0) }; 9];
 
 const FUNDO: usize = 0;
 const FUNDO_CLARO: usize = 1;
@@ -53,11 +56,12 @@ const TEXTO: usize = 4;
 const TEXTO_FORTE: usize = 5;
 const DESTAQUE: usize = 6;
 const APAGADO: usize = 7;
+const VERMELHO: usize = 8;
 
-/// Chamado pela barra: modo e as 8 cores, na ordem de `CORES`.
+/// Chamado pela barra: modo e as 9 cores, na ordem de `CORES`.
 ///
 /// # Safety
-/// `cores` aponta para 8 valores.
+/// `cores` aponta para 9 valores.
 #[no_mangle]
 pub unsafe extern "system" fn definir_tema(modo: u32, cores: *const u32) {
     if !cores.is_null() {
@@ -126,15 +130,26 @@ fn prender() {
 
 /// WH_GETMESSAGE: aplica o modo claro/escuro na primeira mensagem do processo e depois de
 /// cada troca de tema.
+///
+/// A mensagem vazia que a barra manda a todas as janelas ao ligar põe os botões do tema nas
+/// janelas que já estavam abertas.
 #[no_mangle]
 pub extern "system" fn gancho(code: i32, wp: WPARAM, lp: LPARAM) -> LRESULT {
     seguro((), aplicar_modo);
+    if code >= 0 && lp.0 != 0 && ligado() {
+        seguro((), || unsafe {
+            let m = &*(lp.0 as *const MSG);
+            if m.message == WM_NULL {
+                vestir_botoes(m.hwnd);
+            }
+        });
+    }
     unsafe { CallNextHookEx(None, code, wp, lp) }
 }
 
 /// WH_CALLWNDPROCRET: depois de o programa preparar o menu (WM_INITMENUPOPUP), converte os
 /// itens; ao fechar (WM_UNINITMENUPOPUP), devolve. Janela com barra de menus ganha a subclasse
-/// que pinta a faixa.
+/// que pinta a faixa; janela com barra de título do Windows ganha os botões do tema.
 #[no_mangle]
 pub extern "system" fn gancho_retorno(code: i32, wp: WPARAM, lp: LPARAM) -> LRESULT {
     if code >= 0 && lp.0 != 0 {
@@ -143,7 +158,11 @@ pub extern "system" fn gancho_retorno(code: i32, wp: WPARAM, lp: LPARAM) -> LRES
             match m.message {
                 WM_INITMENUPOPUP if ligado() => converter(HMENU(m.wParam.0 as *mut _), m.hwnd),
                 WM_UNINITMENUPOPUP => devolver(HMENU(m.wParam.0 as *mut _)),
-                WM_NCPAINT | WM_NCACTIVATE | WM_ACTIVATE if ligado() => vestir_barra_de_menus(m.hwnd),
+                WM_NCPAINT | WM_NCACTIVATE | WM_ACTIVATE if ligado() => {
+                    vestir_barra_de_menus(m.hwnd);
+                    vestir_botoes(m.hwnd);
+                }
+                WM_WINDOWPOSCHANGED if ligado() => vestir_botoes(m.hwnd),
                 _ => {}
             }
         });
@@ -169,25 +188,30 @@ pub extern "system" fn gancho_cbt(code: i32, wp: WPARAM, lp: LPARAM) -> LRESULT 
 
 // ---------- fontes e desenho ----------
 
-struct Fontes(Vec<((u32, bool), isize)>);
+struct Fontes(Vec<((u32, u32, bool), isize)>);
 
 static FONTES: Mutex<Fontes> = Mutex::new(Fontes(Vec::new()));
 
 /// CaskaydiaMono Nerd Font em 12 px na escala do monitor.
 fn fonte(dpi: u32, negrito: bool) -> HFONT {
+    fonte_de(dpi, 12, negrito)
+}
+
+/// CaskaydiaMono Nerd Font em `tamanho` px na escala do monitor.
+fn fonte_de(dpi: u32, tamanho: u32, negrito: bool) -> HFONT {
     let mut f = FONTES.lock().unwrap_or_else(|e| e.into_inner());
-    if let Some(&(_, h)) = f.0.iter().find(|(k, _)| *k == (dpi, negrito)) {
+    if let Some(&(_, h)) = f.0.iter().find(|(k, _)| *k == (dpi, tamanho, negrito)) {
         return HFONT(h as *mut _);
     }
     let h = unsafe {
         CreateFontW(
-            -(((12 * dpi + 48) / 96) as i32), 0, 0, 0,
+            -(((tamanho * dpi + 48) / 96) as i32), 0, 0, 0,
             if negrito { FW_BOLD.0 as i32 } else { FW_NORMAL.0 as i32 },
             0, 0, 0, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, ANTIALIASED_QUALITY, 0,
             w!("CaskaydiaMono NF"),
         )
     };
-    f.0.push(((dpi, negrito), h.0 as isize));
+    f.0.push(((dpi, tamanho, negrito), h.0 as isize));
     h
 }
 
@@ -926,4 +950,407 @@ unsafe fn item_da_barra(h: HWND, dc: HDC, r: RECT, e: u32, t: &[u16]) -> bool {
     escrever(dc, t, r, tinta, DT_CENTER | acesso);
     SelectObject(dc, anterior);
     true
+}
+
+// ---------- botões da barra de título ----------
+
+/// Propriedade na janela que ganhou os botões do tema: a janela dos botões.
+const PROP_BOTOES: PCWSTR = w!("barra-botoes");
+const CLASSE_BOTOES: PCWSTR = w!("barra-botoes");
+const ID_BOTOES: usize = 0xBA05;
+/// Largura de cada botão, em px a 96 dpi: a mesma célula das janelas na barra.
+const CELULA: i32 = 28;
+/// Glifos do menu de sistema no tema (`glifo_de_bitmap`), em 14 px como os glifos de sistema.
+const G_MINIMIZAR: u16 = 0xf2d1;
+const G_MAXIMIZAR: u16 = 0xf2d0;
+const G_RESTAURAR: u16 = 0xf2d2;
+const G_FECHAR: u16 = 0xf00d;
+const TAMANHO_GLIFO: u32 = 14;
+
+#[derive(Clone, Copy, PartialEq)]
+enum Botao {
+    Minimizar,
+    Maximizar,
+    Fechar,
+}
+
+/// Botões da janela, da esquerda para a direita: minimizar e maximizar pelos estilos, fechar
+/// se a classe não tira (CS_NOCLOSE).
+unsafe fn botoes_de(dono: HWND) -> Vec<Botao> {
+    let estilo = GetWindowLongW(dono, GWL_STYLE) as u32;
+    let mut v = Vec::with_capacity(3);
+    if estilo & WS_MINIMIZEBOX.0 != 0 {
+        v.push(Botao::Minimizar);
+    }
+    if estilo & WS_MAXIMIZEBOX.0 != 0 {
+        v.push(Botao::Maximizar);
+    }
+    if GetClassLongPtrW(dono, GCL_STYLE) & CS_NOCLOSE.0 as usize == 0 {
+        v.push(Botao::Fechar);
+    }
+    v
+}
+
+/// Janela com botão na barra (o mesmo critério da barra, que é onde as molduras são pintadas)
+/// e com a barra de título desenhada pelo Windows: a área do programa começa abaixo dela.
+/// Navegadores, Windows Terminal e Explorer estendem a área do programa até o alto e desenham
+/// os próprios botões; ficam como estão.
+unsafe fn titulo_do_windows(h: HWND) -> bool {
+    if !IsWindowVisible(h).as_bool() || IsIconic(h).as_bool() || GetWindowTextLengthW(h) == 0 {
+        return false;
+    }
+    let ex = GetWindowLongW(h, GWL_EXSTYLE) as u32;
+    if ex & WS_EX_APPWINDOW.0 == 0
+        && (ex & (WS_EX_TOOLWINDOW.0 | WS_EX_NOACTIVATE.0) != 0 || GetWindow(h, GW_OWNER).is_ok_and(|o| !o.is_invalid()))
+    {
+        return false;
+    }
+    let mut j = RECT::default();
+    let mut c = POINT::default();
+    if GetWindowRect(h, &mut j).is_err() || !ClientToScreen(h, &mut c).as_bool() {
+        return false;
+    }
+    c.y - j.top >= GetSystemMetricsForDpi(SM_CYCAPTION, dpi_de(h))
+}
+
+/// Estado da janela dos botões, guardado no GWLP_USERDATA: botão sob o mouse, botão apertado
+/// e se a dona está ativa.
+#[derive(Clone, Copy, Default)]
+struct Estado {
+    sob: Option<usize>,
+    apertado: Option<usize>,
+    ativa: bool,
+}
+
+fn ler_estado(h: HWND) -> Estado {
+    let v = unsafe { GetWindowLongPtrW(h, GWLP_USERDATA) } as usize;
+    let botao = |b: usize| (b & 0xFF).checked_sub(1);
+    Estado { sob: botao(v), apertado: botao(v >> 8), ativa: v & 0x1_0000 != 0 }
+}
+
+fn gravar_estado(h: HWND, e: Estado) {
+    let botao = |b: Option<usize>| b.map_or(0, |i| i + 1) & 0xFF;
+    let v = botao(e.sob) | botao(e.apertado) << 8 | (e.ativa as usize) << 16;
+    unsafe { SetWindowLongPtrW(h, GWLP_USERDATA, v as isize) };
+}
+
+/// Liga ou desliga o WS_SYSMENU. Sem ele o DWM não desenha os botões nem o ícone; o título
+/// fica, o duplo clique continua maximizando (WS_MAXIMIZEBOX fica) e Alt+F4 continua fechando.
+unsafe fn menu_de_sistema(h: HWND, sim: bool) {
+    let estilo = GetWindowLongPtrW(h, GWL_STYLE);
+    let menu = WS_SYSMENU.0 as isize;
+    let novo = if sim { estilo | menu } else { estilo & !menu };
+    if novo != estilo {
+        SetWindowLongPtrW(h, GWL_STYLE, novo);
+        _ = SetWindowPos(h, None, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+    }
+}
+
+fn modulo() -> HMODULE {
+    let mut m = HMODULE::default();
+    unsafe {
+        _ = GetModuleHandleExW(
+            GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+            PCWSTR(modulo as *const () as *const u16),
+            &mut m,
+        );
+    }
+    m
+}
+
+/// Janela dos botões: popup da própria janela (fica logo acima dela na ordem das janelas, some
+/// quando ela minimiza), sem ativar e fora da lista de janelas.
+unsafe fn criar_botoes(dono: HWND) -> Option<HWND> {
+    static REGISTRADA: AtomicBool = AtomicBool::new(false);
+    let inst = HINSTANCE(modulo().0);
+    if !REGISTRADA.swap(true, Ordering::Relaxed) {
+        let wc = WNDCLASSW {
+            style: CS_HREDRAW | CS_VREDRAW,
+            lpfnWndProc: Some(proc_botoes),
+            hInstance: inst,
+            hCursor: LoadCursorW(None, IDC_ARROW).unwrap_or_default(),
+            lpszClassName: CLASSE_BOTOES,
+            ..Default::default()
+        };
+        RegisterClassW(&wc);
+    }
+    // no mesmo modo de DPI da dona, para as coordenadas baterem
+    let antes = SetThreadDpiAwarenessContext(GetWindowDpiAwarenessContext(dono));
+    let b = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, CLASSE_BOTOES, w!(""), WS_POPUP, 0, 0, 0, 0, Some(dono), None, Some(inst), None).ok();
+    if !antes.0.is_null() {
+        SetThreadDpiAwarenessContext(antes);
+    }
+    b
+}
+
+fn botoes(dono: HWND) -> Option<HWND> {
+    let p = unsafe { GetPropW(dono, PROP_BOTOES) };
+    (!p.0.is_null()).then(|| HWND(p.0))
+}
+
+/// Janela com barra de título do Windows ganha os botões do tema (uma vez por janela).
+unsafe fn vestir_botoes(h: HWND) {
+    if h.is_invalid() || botoes(h).is_some() {
+        return;
+    }
+    let estilo = GetWindowLongW(h, GWL_STYLE) as u32;
+    if estilo & WS_CHILD.0 != 0 || estilo & WS_SYSMENU.0 == 0 || estilo & WS_CAPTION.0 != WS_CAPTION.0 {
+        return;
+    }
+    if !titulo_do_windows(h) || botoes_de(h).is_empty() {
+        return;
+    }
+    prender();
+    let Some(b) = criar_botoes(h) else { return };
+    // a propriedade antes de mexer no estilo: as mensagens que isso manda voltam a este gancho
+    _ = SetPropW(h, PROP_BOTOES, Some(HANDLE(b.0)));
+    gravar_estado(b, Estado { ativa: GetAncestor(GetForegroundWindow(), GA_ROOTOWNER) == h, ..Default::default() });
+    _ = SetWindowSubclass(h, Some(proc_dono_dos_botoes), ID_BOTOES, 0);
+    menu_de_sistema(h, false);
+    posicionar_botoes(h);
+}
+
+/// Tira os botões do tema; `devolver`: a janela continua aberta e recebe o WS_SYSMENU de volta.
+unsafe fn despir_botoes(h: HWND, devolver: bool) {
+    let b = botoes(h);
+    _ = RemovePropW(h, PROP_BOTOES);
+    _ = RemoveWindowSubclass(h, Some(proc_dono_dos_botoes), ID_BOTOES);
+    if let Some(b) = b {
+        _ = DestroyWindow(b);
+    }
+    if devolver {
+        menu_de_sistema(h, true);
+    }
+}
+
+/// Onde ficam os botões, em coordenadas de tela: no canto direito da barra de título, da borda
+/// de cima (1 px) até a barra de menus ou a área do programa. Maximizada, a borda sobra para
+/// fora do monitor nos quatro lados, e a barra de título começa depois dela.
+unsafe fn lugar_dos_botoes(dono: HWND, n: i32) -> Option<RECT> {
+    let mut j = RECT::default();
+    GetWindowRect(dono, &mut j).ok()?;
+    let mut c = POINT::default();
+    if !ClientToScreen(dono, &mut c).as_bool() {
+        return None;
+    }
+    let dpi = dpi_de(dono);
+    let ex = GetWindowLongW(dono, GWL_EXSTYLE) as u32;
+    let aba = if ex & WS_EX_CLIENTEDGE.0 != 0 { GetSystemMetricsForDpi(SM_CXEDGE, dpi) } else { 0 };
+    let lado = c.x - j.left - aba;
+    let mut base = c.y - aba;
+    if !GetMenu(dono).is_invalid() {
+        let mut mbi = MENUBARINFO { cbSize: size_of::<MENUBARINFO>() as u32, ..Default::default() };
+        if GetMenuBarInfo(dono, OBJID_MENU, 0, &mut mbi).is_ok() {
+            base = base.min(mbi.rcBar.top);
+        }
+    }
+    let topo = if IsZoomed(dono).as_bool() { j.top + lado } else { j.top + 1 };
+    let direita = j.right - lado;
+    let esquerda = direita - n * px(CELULA, dpi);
+    (base > topo && esquerda > j.left + lado).then_some(RECT { left: esquerda, top: topo, right: direita, bottom: base })
+}
+
+/// Lugar na ordem das janelas logo acima da dona. A janela dos botões nasce no alto de tudo, e
+/// o Windows só garante que ela fique acima da dona. `true`: já está lá.
+unsafe fn logo_acima(dono: HWND, b: HWND) -> (Option<HWND>, bool) {
+    let acima = GetWindow(dono, GW_HWNDPREV).ok().filter(|a| !a.is_invalid());
+    let topo = |j: HWND| GetWindowLongW(j, GWL_EXSTYLE) as u32 & WS_EX_TOPMOST.0 != 0;
+    match acima {
+        Some(a) if a == b => (None, true),
+        // SetWindowPos põe a janela logo abaixo de `a`, entre ela e a dona; acima da faixa
+        // das janelas sempre no topo, o alto da faixa normal é o mesmo lugar
+        Some(a) if !topo(a) || topo(dono) => (Some(a), false),
+        _ => (Some(HWND_TOP), false),
+    }
+}
+
+/// Acompanha a dona: posição, tamanho, ordem, maximizada ou não, visível ou não.
+unsafe fn posicionar_botoes(dono: HWND) {
+    let Some(b) = botoes(dono) else { return };
+    let estilo = GetWindowLongW(dono, GWL_STYLE) as u32;
+    let n = botoes_de(dono).len() as i32;
+    let visivel = IsWindowVisible(dono).as_bool() && !IsIconic(dono).as_bool() && estilo & WS_CAPTION.0 == WS_CAPTION.0 && n > 0;
+    match visivel.then(|| lugar_dos_botoes(dono, n)).flatten() {
+        Some(r) => {
+            let (ordem, fixa) = logo_acima(dono, b);
+            let z = if fixa { SWP_NOZORDER } else { SET_WINDOW_POS_FLAGS(0) };
+            _ = SetWindowPos(b, ordem, r.left, r.top, r.right - r.left, r.bottom - r.top, z | SWP_NOACTIVATE | SWP_SHOWWINDOW);
+        }
+        None => {
+            _ = ShowWindow(b, SW_HIDE);
+            gravar_estado(b, Estado { ativa: ler_estado(b).ativa, ..Default::default() });
+        }
+    }
+    redesenhar(b);
+}
+
+unsafe extern "system" fn proc_dono_dos_botoes(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM, _: usize, _: usize) -> LRESULT {
+    if !ligado() {
+        // tema desligado ou barra fechada: os botões do Windows voltam na primeira mensagem
+        seguro((), || despir_botoes(h, true));
+        return DefSubclassProc(h, msg, wp, lp);
+    }
+    match msg {
+        WM_NCDESTROY => {
+            seguro((), || despir_botoes(h, false));
+            DefSubclassProc(h, msg, wp, lp)
+        }
+        WM_STYLECHANGED => {
+            let r = DefSubclassProc(h, msg, wp, lp);
+            seguro((), || {
+                // o console põe o menu de sistema de volta em algumas trocas de modo
+                if wp.0 as i32 == GWL_STYLE.0 && GetWindowLongW(h, GWL_STYLE) as u32 & WS_SYSMENU.0 != 0 {
+                    menu_de_sistema(h, false);
+                }
+                posicionar_botoes(h);
+            });
+            r
+        }
+        WM_WINDOWPOSCHANGED => {
+            let r = DefSubclassProc(h, msg, wp, lp);
+            seguro((), || posicionar_botoes(h));
+            r
+        }
+        WM_NCACTIVATE => {
+            let r = DefSubclassProc(h, msg, wp, lp);
+            seguro((), || {
+                if let Some(b) = botoes(h) {
+                    gravar_estado(b, Estado { ativa: wp.0 != 0, ..ler_estado(b) });
+                    redesenhar(b);
+                }
+            });
+            r
+        }
+        _ => DefSubclassProc(h, msg, wp, lp),
+    }
+}
+
+/// Botão sob o ponto (coordenadas da janela dos botões).
+unsafe fn botao_em(h: HWND, lp: LPARAM) -> Option<usize> {
+    let (x, y) = ((lp.0 & 0xFFFF) as i16 as i32, ((lp.0 >> 16) & 0xFFFF) as i16 as i32);
+    let mut c = RECT::default();
+    GetClientRect(h, &mut c).ok()?;
+    let dono = GetWindow(h, GW_OWNER).ok()?;
+    let i = x / px(CELULA, dpi_de(h));
+    (x >= 0 && y >= 0 && x < c.right && y < c.bottom && (i as usize) < botoes_de(dono).len()).then_some(i as usize)
+}
+
+/// Clique no botão: o mesmo comando que os botões do Windows mandam.
+unsafe fn acionar(h: HWND, i: usize) {
+    let Ok(dono) = GetWindow(h, GW_OWNER) else { return };
+    let Some(&b) = botoes_de(dono).get(i) else { return };
+    let comando = match b {
+        Botao::Minimizar => SC_MINIMIZE,
+        Botao::Maximizar if IsZoomed(dono).as_bool() => SC_RESTORE,
+        Botao::Maximizar => SC_MAXIMIZE,
+        Botao::Fechar => SC_CLOSE,
+    };
+    _ = PostMessageW(Some(dono), WM_SYSCOMMAND, WPARAM(comando as usize), LPARAM(0));
+}
+
+/// Fundo `fundo`, como a barra de título pintada pelas molduras. Glifo em `texto` com a dona
+/// ativa e apagado sem ela; sob o mouse, fundo `fundo_claro` (`selecao` apertado) e glifo
+/// `texto_forte`, `vermelho` no fechar.
+unsafe fn pintar_botoes(h: HWND) {
+    let mut ps = PAINTSTRUCT::default();
+    let dc = BeginPaint(h, &mut ps);
+    let mut c = RECT::default();
+    _ = GetClientRect(h, &mut c);
+    preencher(dc, c, cor(FUNDO));
+    if let Ok(dono) = GetWindow(h, GW_OWNER) {
+        let e = ler_estado(h);
+        let dpi = dpi_de(h);
+        let cel = px(CELULA, dpi);
+        let zoom = IsZoomed(dono).as_bool();
+        let anterior = SelectObject(dc, fonte_de(dpi, TAMANHO_GLIFO, false).into());
+        for (i, b) in botoes_de(dono).into_iter().enumerate() {
+            let r = RECT { left: i as i32 * cel, top: 0, right: (i as i32 + 1) * cel, bottom: c.bottom };
+            let sob = e.sob == Some(i);
+            if sob {
+                preencher(dc, r, cor(if e.apertado == Some(i) { SELECAO } else { FUNDO_CLARO }));
+            }
+            let tinta = match (sob, b) {
+                (true, Botao::Fechar) => cor(VERMELHO),
+                (true, _) => cor(TEXTO_FORTE),
+                _ if e.ativa => cor(TEXTO),
+                _ => cor(APAGADO),
+            };
+            let g = match b {
+                Botao::Minimizar => G_MINIMIZAR,
+                Botao::Maximizar if zoom => G_RESTAURAR,
+                Botao::Maximizar => G_MAXIMIZAR,
+                Botao::Fechar => G_FECHAR,
+            };
+            escrever(dc, &glifo(g), r, tinta, DT_CENTER);
+        }
+        SelectObject(dc, anterior);
+    }
+    _ = EndPaint(h, &ps);
+}
+
+fn redesenhar(h: HWND) {
+    unsafe { _ = InvalidateRect(Some(h), None, false) };
+}
+
+unsafe extern "system" fn proc_botoes(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
+    match msg {
+        WM_MOUSEACTIVATE => LRESULT(MA_NOACTIVATE as isize),
+        WM_ERASEBKGND => LRESULT(1),
+        // a barra manda a mensagem vazia a todas as janelas quando troca o tema
+        WM_NULL => {
+            redesenhar(h);
+            LRESULT(0)
+        }
+        WM_PAINT => {
+            seguro((), || pintar_botoes(h));
+            _ = ValidateRect(Some(h), None);
+            LRESULT(0)
+        }
+        WM_MOUSEMOVE => {
+            seguro((), || {
+                let e = ler_estado(h);
+                let sob = botao_em(h, lp);
+                if e.sob != sob {
+                    gravar_estado(h, Estado { sob, ..e });
+                    redesenhar(h);
+                }
+                let mut t = TRACKMOUSEEVENT { cbSize: size_of::<TRACKMOUSEEVENT>() as u32, dwFlags: TME_LEAVE, hwndTrack: h, dwHoverTime: 0 };
+                _ = TrackMouseEvent(&mut t);
+            });
+            LRESULT(0)
+        }
+        WM_MOUSELEAVE => {
+            gravar_estado(h, Estado { sob: None, ..ler_estado(h) });
+            redesenhar(h);
+            LRESULT(0)
+        }
+        WM_LBUTTONDOWN => {
+            seguro((), || {
+                let sob = botao_em(h, lp);
+                gravar_estado(h, Estado { sob, apertado: sob, ..ler_estado(h) });
+                SetCapture(h);
+                redesenhar(h);
+            });
+            LRESULT(0)
+        }
+        WM_LBUTTONUP => {
+            seguro((), || {
+                let e = ler_estado(h);
+                let sob = botao_em(h, lp);
+                gravar_estado(h, Estado { sob, apertado: None, ..e });
+                _ = ReleaseCapture();
+                redesenhar(h);
+                if let Some(i) = e.apertado.filter(|&i| sob == Some(i)) {
+                    acionar(h, i);
+                }
+            });
+            LRESULT(0)
+        }
+        WM_CAPTURECHANGED => {
+            gravar_estado(h, Estado { apertado: None, ..ler_estado(h) });
+            redesenhar(h);
+            LRESULT(0)
+        }
+        _ => DefWindowProcW(h, msg, wp, lp),
+    }
 }
