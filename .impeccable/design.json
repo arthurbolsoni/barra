@@ -237,7 +237,7 @@
       "name": "Botão de janela",
       "kind": "button",
       "refersTo": "botao-janela",
-      "description": "Célula de 28 px só com ícone de 16 px; foco com linha de destaque, piscando em amarelo, progresso no alto, minimizada apagada.",
+      "description": "Célula de 28 px só com ícone de 16 px; foco com fundo de seleção, piscando em amarelo, progresso no alto, minimizada apagada.",
       "html": "<div class=\"ds-bj-wrap\"><button class=\"ds-bj ds-bj-foco\"><i></i></button><button class=\"ds-bj ds-bj-pisca\"><i></i></button><button class=\"ds-bj ds-bj-prog\"><i></i></button><button class=\"ds-bj ds-bj-min\"><i></i></button></div>",
       "css": ".ds-bj-wrap{display:flex;height:26px;background:#1a1b26}.ds-bj{width:28px;height:26px;border:0;border-radius:0;background:transparent;position:relative;display:flex;align-items:center;justify-content:center;padding:0}.ds-bj i{width:16px;height:16px;background:#a9b1d6;display:block}.ds-bj:hover{background:#24283b}.ds-bj:focus-visible{outline:2px solid #7aa2f7;outline-offset:-2px}.ds-bj-foco::after,.ds-bj-pisca::after{content:'';position:absolute;left:4px;right:4px;bottom:0;height:2px;background:#7aa2f7}.ds-bj-pisca{background:rgba(224,175,104,.28)}.ds-bj-pisca::after{background:#e0af68}.ds-bj-prog::before{content:'';position:absolute;left:4px;right:4px;top:0;height:2px;background:linear-gradient(90deg,#9ece6a 60%,#292e42 60%)}.ds-bj-min i{opacity:.4}"
     },
@@ -308,7 +308,7 @@
       },
       {
         "name": "A Regra do Glifo Monocromático",
-        "body": "Glifos da Nerd Font (`f067` mais, `f05a9` rede, `f057e` volume, `f120` terminal, `f11c` teclado, `f0e4` Gerenciador de Tarefas) são desenhados numa cor de papel do tema, nunca coloridos. Eles substituem o ícone colorido apenas do Gerenciador de Tarefas, dos terminais (Windows Terminal, conhost, OpenConsole, wt, pwsh, powershell, cmd) e do AutoHotkey; os outros programas mantêm o próprio ícone.",
+        "body": "Glifos da Nerd Font (`f067` mais, `f0200` rede, `f057e` volume, `f120` terminal, `f11c` teclado, `f0e4` Gerenciador de Tarefas) são desenhados numa cor de papel do tema, nunca coloridos. Eles substituem o ícone colorido apenas do Gerenciador de Tarefas, dos terminais (Windows Terminal, conhost, OpenConsole, wt, pwsh, powershell, cmd) e do AutoHotkey; os outros programas mantêm o próprio ícone.",
         "section": "typography"
       },
       {

@@ -26,6 +26,9 @@ pub static ALT_TAB: AtomicBool = AtomicBool::new(true);
 /// Visão geral aberta: o gancho manda as teclas para ela mesmo sem o foco.
 pub static VISAO_ABERTA: AtomicBool = AtomicBool::new(false);
 pub static VISAO: AtomicIsize = AtomicIsize::new(0);
+/// Painel de rede ou volume aberto (ele não pega o foco): o Esc vai para ele.
+pub static PAINEL_ABERTO: AtomicBool = AtomicBool::new(false);
+pub static PAINEL: AtomicIsize = AtomicIsize::new(0);
 /// Só para teste (BARRA_TESTE=1): aceita teclas simuladas por SendInput.
 static ACEITA_SIMULADA: AtomicBool = AtomicBool::new(false);
 
@@ -91,6 +94,11 @@ unsafe extern "system" fn gancho(code: i32, wp: WPARAM, lp: LPARAM) -> LRESULT {
             // direto para ela, senão o Enter e os números cairiam na janela que estava na frente
             let visao = HWND(VISAO.load(Ordering::Relaxed) as *mut _);
             if VISAO_ABERTA.load(Ordering::Relaxed) && desce && GetForegroundWindow() != visao && encaminhar(visao, vk, k.scanCode) {
+                return LRESULT(1);
+            }
+            if PAINEL_ABERTO.load(Ordering::Relaxed) && vk == VK_ESCAPE && desce {
+                let p = HWND(PAINEL.load(Ordering::Relaxed) as *mut _);
+                _ = PostMessageW(Some(p), WM_KEYDOWN, WPARAM(VK_ESCAPE.0 as usize), LPARAM(0));
                 return LRESULT(1);
             }
             if MODO_ALT.load(Ordering::Relaxed) {

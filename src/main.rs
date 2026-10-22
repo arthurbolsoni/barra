@@ -1,12 +1,16 @@
 #![windows_subsystem = "windows"]
 
 mod appbar;
+mod audio;
+mod bluetooth;
 mod bandeja;
 mod desenho;
 mod grupos;
 mod janelas;
 mod menus_externos;
 mod molduras;
+mod painel;
+mod rede;
 mod sistema;
 mod tema;
 mod teclado;
@@ -30,7 +34,7 @@ use windows::Win32::UI::Input::KeyboardAndMouse::*;
 use windows::Win32::UI::Shell::{DefSubclassProc, SetWindowSubclass};
 use windows::Win32::UI::WindowsAndMessaging::*;
 
-use desenho::{Alvo, Alvos, CartaoV, Cena, CenaVisao, ItemBandeja, ItemGrupo, ItemJanela, JanelaV};
+use desenho::{Alvo, AlvoPainel, Alvos, CartaoV, Cena, CenaPainel, CenaVisao, ItemBandeja, ItemGrupo, ItemJanela, JanelaV};
 use janelas::hwnd;
 use teclado::{forcar_primeiro_plano, MODO_ALT};
 
@@ -43,6 +47,12 @@ const TITULO: PCWSTR = w!("barra");
 const WM_APPBAR: u32 = WM_APP + 1;
 const WM_PRIMEIRO_PLANO: u32 = WM_APP + 2;
 const WM_RENOMEAR: u32 = WM_APP + 3;
+/// Leitura do Bluetooth terminada (lParam: Box<bluetooth::Situacao>).
+const WM_BT_LIDO: u32 = WM_APP + 4;
+/// Pedido ao Bluetooth terminado (lParam: Box<bluetooth::Situacao> lida depois dele).
+const WM_BT_FEITO: u32 = WM_APP + 5;
+/// Clique fora do painel aberto (lParam: ponto na tela).
+const WM_CLIQUE_FORA: u32 = WM_APP + 6;
 const TIMER: usize = 1;
 const DIAS: [&str; 7] = ["Domingo", "Segunda-feira", "Terça-feira", "Quarta-feira", "Quinta-feira", "Sexta-feira", "Sábado"];
 const MESES: [&str; 12] = [
@@ -95,6 +105,11 @@ struct Estado {
     msg_barra_criada: u32,
     esconder_windows: bool,
     escala: f32,
+    /// Painel de rede ou de volume aberto embaixo do ícone.
+    painel: painel::Painel,
+    audio: Option<audio::Audio>,
+    /// Glifo da rede, se tem conexão, e a dica.
+    rede: (&'static str, bool, String),
 }
 
 thread_local! {
@@ -105,6 +120,7 @@ thread_local! {
 static BARRA: AtomicIsize = AtomicIsize::new(0);
 static VISAO: AtomicIsize = AtomicIsize::new(0);
 static DICA: AtomicIsize = AtomicIsize::new(0);
+static PAINEL: AtomicIsize = AtomicIsize::new(0);
 
 /// Acesso ao estado. Devolve None se ele já está em uso (mensagem que chegou no meio de
 /// outra operação, enquanto o Windows espera outra janela responder).
@@ -216,6 +232,12 @@ fn cena(st: &mut Estado, w: i32, h: i32) -> Cena {
         hover: st.hover,
         hora: format!("{} {:02}:{:02}", DIAS[t.wDayOfWeek as usize % 7], t.wHour, t.wMinute),
         bandeja: bandeja::visiveis().into_iter().map(|(indice, icone, _, dono)| ItemBandeja { indice, icone, glifo: janelas::glifo(hwnd(dono)) }).collect(),
+        rede: (st.rede.0, st.rede.1),
+        volume: st.audio.as_ref().and_then(|a| a.nivel()),
+        aberto: st.painel.tipo.map(|t| match t {
+            painel::Tipo::Volume => Alvo::Volume,
+            painel::Tipo::Rede => Alvo::Rede,
+        }),
     }
 }
 
@@ -280,7 +302,8 @@ fn clicar(alvo: Alvo) {
         }
         Alvo::Janela(h) => clicar_janela(h),
         Alvo::Bandeja(i) => bandeja::clicar(i, bandeja::Botao::Esquerdo, cursor()),
-        Alvo::Sistema => sistema::abrir_configuracoes_rapidas(),
+        Alvo::Rede => abrir_painel(painel::Tipo::Rede),
+        Alvo::Volume => abrir_painel(painel::Tipo::Volume),
         Alvo::Relogio => sistema::abrir_notificacoes(),
     }
 }
@@ -288,13 +311,21 @@ fn clicar(alvo: Alvo) {
 // ---------- dica ----------
 
 fn mostrar_dica(st: &mut Estado) {
-    let texto = match st.hover {
+    // com o painel aberto a dica cobriria ele
+    let hover = st.hover.filter(|_| st.painel.tipo.is_none());
+    let texto = match hover {
         Some(Alvo::Bandeja(i)) => bandeja::visiveis().into_iter().find(|(n, _, _, _)| *n == i).map(|(_, _, d, _)| d).unwrap_or_default(),
         Some(Alvo::Janela(h)) => janelas::titulo(hwnd(h)),
         Some(Alvo::Relogio) => {
             let t = unsafe { GetLocalTime() };
             format!("{}, {} de {} de {}", DIAS[t.wDayOfWeek as usize % 7], t.wDay, MESES[(t.wMonth as usize + 11) % 12], t.wYear)
         }
+        Some(Alvo::Rede) => st.rede.2.clone(),
+        Some(Alvo::Volume) => match st.audio.as_ref().and_then(|a| a.nivel()) {
+            Some((_, true)) => "Volume: mudo".into(),
+            Some((n, false)) => format!("Volume: {}%", (n * 100.0).round() as i32),
+            None => "Sem saída de som".into(),
+        },
         Some(Alvo::Grupo(i)) => st.grupos.lista.get(i).map(|g| match g.janelas.len() {
             0 => format!("Grupo {}: nenhuma janela", g.nome),
             1 => format!("Grupo {}: 1 janela", g.nome),
@@ -302,7 +333,7 @@ fn mostrar_dica(st: &mut Estado) {
         }).unwrap_or_default(),
         _ => String::new(),
     };
-    let r = st.hover.and_then(|a| st.alvos.iter().find(|(_, b)| *b == a).map(|(r, _)| *r));
+    let r = hover.and_then(|a| st.alvos.iter().find(|(_, b)| *b == a).map(|(r, _)| *r));
     let (Some(r), false) = (r, texto.is_empty()) else {
         st.dica_texto.clear();
         unsafe { _ = ShowWindow(st.dica, SW_HIDE) };
@@ -319,6 +350,368 @@ fn mostrar_dica(st: &mut Estado) {
         _ = SetWindowPos(st.dica, Some(HWND_TOPMOST), x, y, w, h, SWP_NOACTIVATE | SWP_SHOWWINDOW);
     }
     invalidar(st.dica);
+}
+
+// ---------- painéis de rede e volume ----------
+
+fn renovar_rede(st: &mut Estado) {
+    let placas = rede::placas();
+    let principal = placas.iter().find(|p| p.internet).or_else(|| placas.iter().find(|p| p.conectada));
+    st.rede = match principal {
+        Some(p) if p.ip.is_empty() => (p.glifo, true, p.nome.clone()),
+        Some(p) => (p.glifo, true, format!("{}: {}", p.nome, p.ip)),
+        None => (rede::G_SEM_REDE, false, "Sem conexão de rede".into()),
+    };
+    if st.painel.tipo == Some(painel::Tipo::Rede) {
+        st.painel.placas = placas;
+    }
+}
+
+/// Ícone de cada programa do painel de volume: o da janela do mesmo executável.
+fn icones_programas(st: &mut Estado) -> Vec<HICON> {
+    let mut por_exe: HashMap<String, isize> = HashMap::new();
+    for g in &st.grupos.lista {
+        for &j in &g.janelas {
+            let mut pid = 0u32;
+            unsafe { GetWindowThreadProcessId(hwnd(j), Some(&mut pid)) };
+            if let Some(e) = audio::caminho_do_processo(pid) {
+                por_exe.entry(e.to_lowercase()).or_insert(j);
+            }
+        }
+    }
+    let exes: Vec<String> = st.painel.programas.iter().map(|p| p.exe.to_lowercase()).collect();
+    exes.iter().map(|e| por_exe.get(e).map(|&j| icone_de(st, j)).unwrap_or_default()).collect()
+}
+
+/// Manda a leitura do Bluetooth para a janela do painel (WM_BT_LIDO ou WM_BT_FEITO).
+fn devolver_bluetooth(h: isize, msg: u32, s: bluetooth::Situacao) {
+    let s = Box::into_raw(Box::new(s));
+    unsafe {
+        if PostMessageW(Some(hwnd(h)), msg, WPARAM(0), LPARAM(s as isize)).is_err() {
+            drop(Box::from_raw(s));
+        }
+    }
+}
+
+/// Lê o Bluetooth numa thread; o resultado volta em WM_BT_LIDO.
+fn ler_bluetooth(st: &mut Estado) {
+    if st.painel.lendo || st.painel.pedido.is_some() {
+        return;
+    }
+    st.painel.lendo = true;
+    let h = st.painel.hwnd.0 as isize;
+    std::thread::spawn(move || devolver_bluetooth(h, WM_BT_LIDO, bluetooth::ler()));
+}
+
+/// Liga/desliga o rádio ou conecta/desconecta um fone, numa thread. Espera o aparelho mudar
+/// de estado (até 10 s) e devolve a leitura de depois em WM_BT_FEITO.
+fn pedir_bluetooth(st: &mut Estado, p: painel::Pedido) {
+    if st.painel.pedido.is_some() {
+        return;
+    }
+    let ligado = st.painel.bt.as_ref().and_then(|b| b.radio).unwrap_or(false);
+    st.painel.pedido = Some(p);
+    let h = st.painel.hwnd.0 as isize;
+    std::thread::spawn(move || {
+        let pronto = |s: &bluetooth::Situacao| match p {
+            painel::Pedido::Radio => s.radio == Some(!ligado),
+            painel::Pedido::Conectar(e) => s.dispositivos.iter().any(|d| d.endereco == e && d.conectado),
+            painel::Pedido::Desconectar(e) => !s.dispositivos.iter().any(|d| d.endereco == e && d.conectado),
+        };
+        match p {
+            painel::Pedido::Radio => bluetooth::ligar_radio(!ligado),
+            painel::Pedido::Conectar(e) => bluetooth::conectar(e, true),
+            painel::Pedido::Desconectar(e) => bluetooth::conectar(e, false),
+        }
+        let mut s = bluetooth::ler();
+        for _ in 0..10 {
+            if pronto(&s) {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_secs(1));
+            s = bluetooth::ler();
+        }
+        devolver_bluetooth(h, WM_BT_FEITO, s);
+    });
+}
+
+/// Altura do painel conforme as linhas de agora.
+fn ajustar_painel(st: &mut Estado) {
+    if st.painel.tipo.is_none() {
+        return;
+    }
+    let h = desenho::altura_painel(&st.painel.linhas(st.audio.as_ref()), st.escala);
+    let w = (painel::LARGURA * st.escala).round() as i32;
+    unsafe { _ = SetWindowPos(st.painel.hwnd, None, 0, 0, w, h, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE) };
+    invalidar(st.painel.hwnd);
+}
+
+/// Relê o que o painel aberto mostra (a cada segundo e depois de cada ação).
+fn renovar_painel(st: &mut Estado) {
+    match st.painel.tipo {
+        Some(painel::Tipo::Volume) if st.painel.arrasto.is_none() => {
+            if let Some(a) = st.audio.as_mut() {
+                a.renovar();
+                st.painel.saidas = a.saidas();
+                st.painel.programas = a.programas();
+            }
+            st.painel.icones = icones_programas(st);
+        }
+        Some(painel::Tipo::Rede) => {
+            renovar_rede(st);
+            if st.painel.ticks % 3 == 0 {
+                ler_bluetooth(st);
+            }
+        }
+        _ => {}
+    }
+    st.painel.ticks += 1;
+    ajustar_painel(st);
+}
+
+/// Gancho de mouse, ligado só com o painel aberto: clique fora dele fecha.
+static GANCHO_MOUSE: AtomicIsize = AtomicIsize::new(0);
+
+unsafe extern "system" fn gancho_mouse(code: i32, wp: WPARAM, lp: LPARAM) -> LRESULT {
+    if code == HC_ACTION as i32 && matches!(wp.0 as u32, WM_LBUTTONDOWN | WM_RBUTTONDOWN | WM_MBUTTONDOWN) {
+        let m = &*(lp.0 as *const MSLLHOOKSTRUCT);
+        let p = HWND(PAINEL.load(Ordering::Relaxed) as *mut _);
+        let mut r = RECT::default();
+        _ = GetWindowRect(p, &mut r);
+        if !PtInRect(&r, m.pt).as_bool() {
+            let ponto = (m.pt.x as u16 as isize) | ((m.pt.y as u16 as isize) << 16);
+            _ = PostMessageW(Some(p), WM_CLIQUE_FORA, WPARAM(0), LPARAM(ponto));
+        }
+    }
+    CallNextHookEx(None, code, wp, lp)
+}
+
+fn fechar_painel(st: &mut Estado) {
+    if st.painel.tipo.take().is_none() {
+        return;
+    }
+    st.painel.arrasto = None;
+    st.painel.hover = None;
+    teclado::PAINEL_ABERTO.store(false, Ordering::Relaxed);
+    let g = GANCHO_MOUSE.swap(0, Ordering::Relaxed);
+    unsafe {
+        if g != 0 {
+            _ = UnhookWindowsHookEx(HHOOK(g as *mut _));
+        }
+        _ = ShowWindow(st.painel.hwnd, SW_HIDE);
+    }
+    redesenhar(st);
+}
+
+/// Abre o painel embaixo do ícone dele; clicar no mesmo ícone de novo fecha. O painel não
+/// pega o foco (a janela em uso continua com ele): clique fora e Esc chegam pelos ganchos.
+fn abrir_painel(tipo: painel::Tipo) {
+    _ = com(|st| {
+        if st.painel.tipo == Some(tipo) {
+            fechar_painel(st);
+            return None;
+        }
+        let alvo = match tipo {
+            painel::Tipo::Volume => Alvo::Volume,
+            painel::Tipo::Rede => Alvo::Rede,
+        };
+        let r = st.alvos.iter().find(|(_, a)| *a == alvo).map(|(r, _)| *r)?;
+        st.painel.tipo = Some(tipo);
+        st.painel.hover = None;
+        st.painel.arrasto = None;
+        st.painel.ticks = 0;
+        renovar_painel(st);
+        let mut b = RECT::default();
+        unsafe { _ = GetWindowRect(st.barra, &mut b) };
+        let m = appbar::monitor();
+        let w = (painel::LARGURA * st.escala).round() as i32;
+        let h = desenho::altura_painel(&st.painel.linhas(st.audio.as_ref()), st.escala);
+        let x = (b.left + r.left as i32 - (12.0 * st.escala) as i32).clamp(m.left, m.right - w);
+        unsafe {
+            _ = SetWindowPos(st.painel.hwnd, Some(HWND_TOPMOST), x, b.bottom, w, h, SWP_SHOWWINDOW | SWP_NOACTIVATE);
+            _ = ShowWindow(st.dica, SW_HIDE);
+            if GANCHO_MOUSE.load(Ordering::Relaxed) == 0 {
+                let inst = GetModuleHandleW(PCWSTR::null()).unwrap_or_default();
+                if let Ok(g) = SetWindowsHookExW(WH_MOUSE_LL, Some(gancho_mouse), Some(inst.into()), 0) {
+                    GANCHO_MOUSE.store(g.0 as isize, Ordering::Relaxed);
+                }
+            }
+        }
+        teclado::PAINEL_ABERTO.store(true, Ordering::Relaxed);
+        st.dica_texto.clear();
+        invalidar(st.painel.hwnd);
+        redesenhar(st);
+        Some(())
+    });
+}
+
+fn alvo_painel_em(alvos: &desenho::AlvosPainel, x: i32, y: i32) -> Option<AlvoPainel> {
+    let (x, y) = (x as f32, y as f32);
+    alvos.iter().find(|(r, _)| x >= r.left && x < r.right && y >= r.top && y < r.bottom).map(|(_, a)| *a)
+}
+
+fn abrir_link(i: usize) {
+    let u: Vec<u16> = painel::LINKS[i].1.encode_utf16().chain([0]).collect();
+    sistema::abrir_uri(PCWSTR(u.as_ptr()));
+}
+
+/// Clique no painel.
+fn clicar_painel(st: &mut Estado, alvo: AlvoPainel, x: i32) {
+    match alvo {
+        AlvoPainel::Nivel | AlvoPainel::Programa(_) => {
+            unsafe { SetCapture(st.painel.hwnd) };
+            st.painel.arrasto = Some(alvo);
+            if let Some(n) = st.painel.nivel_em(alvo, x as f32) {
+                st.painel.definir_nivel(st.audio.as_ref(), alvo, n);
+            }
+        }
+        AlvoPainel::Mudo => {
+            if let Some(a) = &st.audio {
+                a.alternar_mudo();
+            }
+        }
+        AlvoPainel::Saida(i) => {
+            let Some(id) = st.painel.saidas.get(i).map(|s| s.id.clone()) else { return };
+            if let Some(a) = st.audio.as_mut() {
+                a.definir_saida(&id);
+            }
+            renovar_painel(st);
+        }
+        AlvoPainel::Radio => pedir_bluetooth(st, painel::Pedido::Radio),
+        AlvoPainel::Bluetooth(i) => {
+            let Some(d) = st.painel.bt.as_ref().and_then(|b| b.dispositivos.get(i)).cloned() else { return };
+            if d.audio {
+                pedir_bluetooth(st, if d.conectado { painel::Pedido::Desconectar(d.endereco) } else { painel::Pedido::Conectar(d.endereco) });
+            } else {
+                // mouse, teclado, controle: o Windows conecta sozinho; aqui só abre as configurações
+                fechar_painel(st);
+                abrir_link(1);
+                return;
+            }
+        }
+        AlvoPainel::Link(i) => {
+            fechar_painel(st);
+            abrir_link(i);
+            return;
+        }
+    }
+    ajustar_painel(st);
+    redesenhar(st);
+}
+
+unsafe fn proc_painel(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
+    match msg {
+        WM_PAINT => {
+            let mut ps = PAINTSTRUCT::default();
+            let dc = BeginPaint(h, &mut ps);
+            let mut r = RECT::default();
+            _ = GetClientRect(h, &mut r);
+            _ = com(|st| {
+                let c = CenaPainel { w: r.right, escala: st.escala, linhas: st.painel.linhas(st.audio.as_ref()), hover: st.painel.hover };
+                if let Ok(a) = st.gfx.desenhar_painel(dc, r.bottom, &c) {
+                    st.painel.alvos = a;
+                }
+            });
+            _ = EndPaint(h, &ps);
+            LRESULT(0)
+        }
+        WM_ERASEBKGND => LRESULT(1),
+        WM_MOUSEMOVE => {
+            let (x, y) = xy(lp);
+            _ = com(|st| {
+                if let Some(a) = st.painel.arrasto {
+                    if let Some(n) = st.painel.nivel_em(a, x as f32) {
+                        st.painel.definir_nivel(st.audio.as_ref(), a, n);
+                        invalidar(h);
+                        redesenhar(st);
+                    }
+                    return;
+                }
+                let a = alvo_painel_em(&st.painel.alvos, x, y);
+                if a != st.painel.hover {
+                    st.painel.hover = a;
+                    invalidar(h);
+                }
+            });
+            let mut t = TRACKMOUSEEVENT { cbSize: size_of::<TRACKMOUSEEVENT>() as u32, dwFlags: TME_LEAVE, hwndTrack: h, dwHoverTime: 0 };
+            _ = TrackMouseEvent(&mut t);
+            LRESULT(0)
+        }
+        WM_MOUSELEAVE => {
+            _ = com(|st| {
+                if st.painel.arrasto.is_none() {
+                    st.painel.hover = None;
+                    invalidar(h);
+                }
+            });
+            LRESULT(0)
+        }
+        WM_LBUTTONDOWN => {
+            let (x, y) = xy(lp);
+            _ = com(|st| {
+                if let Some(a) = alvo_painel_em(&st.painel.alvos, x, y) {
+                    clicar_painel(st, a, x);
+                }
+            });
+            LRESULT(0)
+        }
+        WM_LBUTTONUP => {
+            _ = ReleaseCapture();
+            LRESULT(0)
+        }
+        WM_CAPTURECHANGED => {
+            _ = com(|st| st.painel.arrasto = None);
+            invalidar(h);
+            LRESULT(0)
+        }
+        WM_MOUSEWHEEL => {
+            let mut pt = POINT { x: xy(lp).0, y: xy(lp).1 };
+            _ = ScreenToClient(h, &mut pt);
+            let delta = ((wp.0 >> 16) & 0xFFFF) as i16;
+            _ = com(|st| {
+                let alvo = match alvo_painel_em(&st.painel.alvos, pt.x, pt.y) {
+                    Some(a @ AlvoPainel::Programa(_)) => a,
+                    _ => AlvoPainel::Nivel,
+                };
+                st.painel.somar(st.audio.as_ref(), alvo, if delta > 0 { 0.02 } else { -0.02 });
+                invalidar(h);
+                redesenhar(st);
+            });
+            LRESULT(0)
+        }
+        WM_MOUSEACTIVATE => LRESULT(MA_NOACTIVATE as isize),
+        WM_KEYDOWN if wp.0 == VK_ESCAPE.0 as usize => {
+            _ = com(fechar_painel);
+            LRESULT(0)
+        }
+        WM_CLIQUE_FORA => {
+            // no ícone de rede/volume quem decide é o clique na barra (fecha ou troca de painel)
+            let (x, y) = xy(lp);
+            _ = com(|st| {
+                let mut b = RECT::default();
+                _ = GetWindowRect(st.barra, &mut b);
+                let no_icone = matches!(alvo_em(&st.alvos, x - b.left, y - b.top), Some(Alvo::Rede | Alvo::Volume));
+                if !(no_icone && PtInRect(&b, POINT { x, y }).as_bool()) {
+                    fechar_painel(st);
+                }
+            });
+            LRESULT(0)
+        }
+        WM_BT_LIDO | WM_BT_FEITO => {
+            let s = *Box::from_raw(lp.0 as *mut bluetooth::Situacao);
+            _ = com(|st| {
+                if msg == WM_BT_LIDO {
+                    st.painel.lendo = false;
+                } else {
+                    st.painel.pedido = None;
+                }
+                st.painel.bt = Some(s);
+                ajustar_painel(st);
+            });
+            LRESULT(0)
+        }
+        _ => DefWindowProcW(h, msg, wp, lp),
+    }
 }
 
 // ---------- visão geral ----------
@@ -1029,6 +1422,8 @@ unsafe extern "system" fn proc_janela(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM)
         proc_barra(h, msg, wp, lp)
     } else if h.0 as isize == VISAO.load(Ordering::Relaxed) {
         proc_visao(h, msg, wp, lp)
+    } else if h.0 as isize == PAINEL.load(Ordering::Relaxed) {
+        proc_painel(h, msg, wp, lp)
     } else if h.0 as isize == DICA.load(Ordering::Relaxed) && msg == WM_PAINT {
         let mut ps = PAINTSTRUCT::default();
         let dc = BeginPaint(h, &mut ps);
@@ -1148,11 +1543,41 @@ unsafe fn proc_barra(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
             }
             LRESULT(0)
         }
+        WM_MBUTTONUP => {
+            // clique do meio no volume: mudo
+            let (x, y) = xy(lp);
+            _ = com(|st| {
+                if alvo_em(&st.alvos, x, y) == Some(Alvo::Volume) {
+                    if let Some(a) = &st.audio {
+                        a.alternar_mudo();
+                    }
+                    mostrar_dica(st);
+                    invalidar(st.painel.hwnd);
+                    redesenhar(st);
+                }
+            });
+            LRESULT(0)
+        }
         WM_MOUSEWHEEL => {
-            // roda sobre os grupos: grupo seguinte/anterior
+            // roda sobre os grupos: grupo seguinte/anterior; sobre o volume: 2% por passo
             let mut pt = POINT { x: xy(lp).0, y: xy(lp).1 };
             _ = ScreenToClient(h, &mut pt);
             let delta = ((wp.0 >> 16) & 0xFFFF) as i16;
+            let no_volume = com(|st| {
+                let sim = alvo_em(&st.alvos, pt.x, pt.y) == Some(Alvo::Volume);
+                if sim {
+                    if let Some(a) = &st.audio {
+                        a.somar(if delta > 0 { 0.02 } else { -0.02 });
+                    }
+                    mostrar_dica(st);
+                    invalidar(st.painel.hwnd);
+                    redesenhar(st);
+                }
+                sim
+            });
+            if no_volume == Some(true) {
+                return LRESULT(0);
+            }
             let destino = com(|st| {
                 let sobre_grupos = matches!(alvo_em(&st.alvos, pt.x, pt.y), Some(Alvo::Grupo(_) | Alvo::NovoGrupo));
                 let n = st.grupos.lista.len();
@@ -1253,6 +1678,11 @@ teclado::WM_GRUPO_VIZINHO => {            teclado::mascarar();            let de
                 if st.esconder_windows {
                     sistema::manter_escondida();
                 }
+                if let Some(a) = st.audio.as_mut() {
+                    a.renovar();
+                }
+                renovar_rede(st);
+                renovar_painel(st);
                 atualizar(st);
             });
             LRESULT(0)
@@ -1610,10 +2040,18 @@ fn main() -> Result<()> {
         let menus = criar(WS_EX_TOOLWINDOW, w!("barra-menus"))?;
         let dica = criar(WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_NOACTIVATE | WS_EX_TRANSPARENT, w!("barra-dica"))?;
         let visao_hwnd = criar(WS_EX_TOOLWINDOW | WS_EX_TOPMOST, w!("barra-visao"))?;
+        let painel_hwnd = criar(WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_NOACTIVATE, w!("barra-painel"))?;
+        {
+            use windows::Win32::Graphics::Dwm::*;
+            let canto = DWMWCP_DONOTROUND.0 as u32;
+            _ = DwmSetWindowAttribute(painel_hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, &canto as *const _ as *const _, 4);
+        }
         BARRA.store(barra.0 as isize, Ordering::Relaxed);
         VISAO.store(visao_hwnd.0 as isize, Ordering::Relaxed);
         teclado::VISAO.store(visao_hwnd.0 as isize, Ordering::Relaxed);
         DICA.store(dica.0 as isize, Ordering::Relaxed);
+        PAINEL.store(painel_hwnd.0 as isize, Ordering::Relaxed);
+        teclado::PAINEL.store(painel_hwnd.0 as isize, Ordering::Relaxed);
 
         let atuais = janelas::listar();
         let mut grupos = grupos::Grupos::new();
@@ -1643,8 +2081,12 @@ fn main() -> Result<()> {
                 msg_barra_criada: RegisterWindowMessageW(w!("TaskbarCreated")),
                 esconder_windows: esconder,
                 escala: 1.0,
+                painel: painel::Painel { hwnd: painel_hwnd, ..Default::default() },
+                audio: audio::Audio::new(),
+                rede: (rede::G_SEM_REDE, false, String::new()),
             })
         });
+        _ = com(renovar_rede);
 
         if esconder {
             sistema::esconder_barra_windows();
@@ -1716,6 +2158,9 @@ fn preview(saida: &str) -> Result<()> {
         hover: Some(Alvo::Grupo(4)),
         hora: "Terça-feira 20:25".into(),
         bandeja: (0..4).map(|i| ItemBandeja { indice: i, icone, glifo: (i == 1).then_some(desenho::G_TECLADO) }).collect(),
+        rede: (rede::G_CABO, true),
+        volume: Some((0.45, false)),
+        aberto: None,
     };
     unsafe {
         let dc = CreateCompatibleDC(None);

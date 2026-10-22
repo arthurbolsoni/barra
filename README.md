@@ -12,7 +12,8 @@ Só as janelas do grupo ativo ficam na tela. As dos outros grupos ficam estacion
 | `+` | cria um grupo vazio e vai para ele | | grupo seguinte/anterior |
 | Janela | traz para a frente; se já está na frente, minimiza | mover para outro grupo, novo grupo com ela, fechar | |
 | Ícone da bandeja | repassa o clique ao programa (duplo clique também) | menu do programa | |
-| Rede/volume | configurações rápidas (Win+A) | | |
+| Rede | painel de rede e Bluetooth | | |
+| Volume | painel de volume | | sobe/desce 2% (clique do meio: mudo) |
 | Relógio | notificações e calendário (Win+N) | | |
 | Espaço vazio | | visão geral, esconder a barra do Windows, Alt+Tab abre a visão geral, iniciar com o Windows, juntar tudo num grupo, sair | |
 
@@ -22,6 +23,14 @@ Só as janelas do grupo ativo ficam na tela. As dos outros grupos ficam estacion
 - Passar o mouse num botão ou ícone da bandeja mostra o título/dica.
 - Janelas em outras áreas de trabalho virtuais ficam de fora.
 - A barra é uma AppBar: o Windows desconta a faixa dela da área útil.
+
+## Painéis de rede e volume
+
+Abrem embaixo do ícone, no tema da barra, sem tirar o foco da janela em uso. Fecham com clique fora, Esc ou outro clique no ícone.
+
+- Volume: nível geral (arrastar, clicar no trilho ou rodar; o glifo liga o mudo), saída de som (vira a padrão nos três papéis, pela `IPolicyConfig`) e volume de cada programa que está com som aberto.
+- Rede: as placas físicas, com o IP ou "desconectada", e as VPNs ligadas. Abaixo, o Bluetooth: interruptor do rádio e os dispositivos pareados (clássicos e BLE). Fone e caixa conectam e desconectam ali (pedido ao filtro de áudio Bluetooth, como o ToothTray); os outros abrem as Configurações de Bluetooth.
+- O Bluetooth é lido numa thread à parte e relido a cada 3 s com o painel aberto.
 
 ## Visão geral
 

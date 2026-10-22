@@ -190,13 +190,13 @@ DirectWrite com localidade `pt-br`, sem quebra de linha, corte por caractere com
 ### Named Rules
 **A Regra da Fonte Única.** Texto, número e ícone de sistema saem da CaskaydiaMono Nerd Font. O negrito marca "ativo" nos cartões da visão geral e nos itens marcados dos menus; na barra não há negrito. O tamanho só sobe no título da visão geral.
 
-**A Regra do Glifo Monocromático.** Glifos da Nerd Font (`f067` mais, `f05a9` rede, `f057e` volume, `f120` terminal, `f11c` teclado, `f0e4` Gerenciador de Tarefas) são desenhados numa cor de papel do tema, nunca coloridos. Eles substituem o ícone colorido apenas do Gerenciador de Tarefas, dos terminais (Windows Terminal, conhost, OpenConsole, wt, pwsh, powershell, cmd) e do AutoHotkey; os outros programas mantêm o próprio ícone.
+**A Regra do Glifo Monocromático.** Glifos da Nerd Font (`f067` mais, `f0200` rede, `f057e` volume, `f120` terminal, `f11c` teclado, `f0e4` Gerenciador de Tarefas) são desenhados numa cor de papel do tema, nunca coloridos. Eles substituem o ícone colorido apenas do Gerenciador de Tarefas, dos terminais (Windows Terminal, conhost, OpenConsole, wt, pwsh, powershell, cmd) e do AutoHotkey; os outros programas mantêm o próprio ícone.
 
 ## Layout
 
 Todas as medidas são em px a 96 dpi, multiplicadas pela escala do monitor.
 
-**Barra.** Faixa de 26 px no topo, registrada como AppBar. Esquerda, a partir de 6 px da borda: grupos lado a lado, cada um com a largura do nome (mínimo 7 px) mais 14 px; o "+" numa célula de 24 px; 14 px de separação; as janelas do grupo ativo em células de 28 px com ícone de 16 px centralizado. Direita, a 6 px da borda: rede e volume dividindo uma célula de 56 px; 6 px antes dela, os ícones da bandeja em células de 24 px, da direita para a esquerda. Centro: dia e hora, com 8 px de folga em cada lado; o relógio some quando as janelas ou a bandeja chegariam até ele.
+**Barra.** Faixa de 26 px no topo, registrada como AppBar. Esquerda, a partir de 6 px da borda: grupos lado a lado, cada um com a largura do nome (mínimo 7 px) mais 14 px; o "+" numa célula de 24 px; 14 px de separação; as janelas do grupo ativo em células de 28 px com ícone de 16 px centralizado. Direita, a 6 px da borda: volume e rede em células de 28 px; 6 px antes delas, os ícones da bandeja em células de 24 px, da direita para a esquerda. Centro: dia e hora, com 8 px de folga em cada lado; o relógio some quando as janelas ou a bandeja chegariam até ele.
 
 **Dica.** Abaixo da barra, 6 px de distância, centralizada no alvo e presa a 4 px das bordas do monitor. Altura 26 px, largura do texto mais 22 px, limite de 640 px de texto.
 
@@ -231,7 +231,7 @@ Nomes de grupo como os workspaces da Waybar: só texto, sem fundo.
 ### Botão de janela
 Só ícone, sem título.
 - **Ícone:** 16 px, reduzido com filtro bicúbico e alinhado ao pixel; ou o glifo da Nerd Font em `texto`.
-- **Foco:** linha `destaque` de 2 px no pé da célula.
+- **Foco:** fundo `selecao` na célula inteira; glifo em `texto-forte`.
 - **Piscando:** fundo `amarelo` a 28% e linha `amarelo` de 2 px no pé.
 - **Hover:** fundo `fundo-claro`.
 - **Minimizada:** ícone em 40% de opacidade (55% em tema claro); glifo na mistura de 50% entre `texto` e `fundo`.
@@ -241,7 +241,9 @@ Só ícone, sem título.
 
 ### Bandeja, sistema e relógio
 - **Bandeja:** ícones de 16 px (ou glifo de 14 px em `texto`) em células de 24 px; hover `fundo-claro`.
-- **Sistema:** glifos de rede e volume, 14 px, `texto`.
+- **Rede:** glifo de 14 px em `texto` numa célula de 28 px: cabo (`f0200`), Wi-Fi (`f05a9`) ou VPN (`f0582`), conforme a placa por onde sai a internet; sem conexão, `f0319` em `texto-apagado`. Dica "{placa}: {IPv4}".
+- **Volume:** glifo de 14 px numa célula de 28 px, pelo nível: `f057f` até 33%, `f0580` até 66%, `f057e` acima; mudo `f0581` em `vermelho`. Dica "Volume: {n}%" ou "Volume: mudo".
+- **Painel aberto:** o ícone fica com fundo `fundo-claro` e glifo em `texto-forte`.
 - **Relógio:** "{Dia da semana} HH:MM" ("Quarta-feira 23:22"), dia com inicial maiúscula e sem vírgula, como o "Friday 12:13" do Omarchy; `texto`, 12 px. Dica com a data por extenso ("Terça-feira, 21 de outubro de 2026").
 
 ### Dica (tooltip)
@@ -249,6 +251,18 @@ Só ícone, sem título.
 - **Background:** `fundo`.
 - **Border:** 2 px `destaque`, por dentro.
 - **Internal Padding:** 8 px de área de texto em cada lado; texto centralizado, 12 px, `texto`.
+
+### Painel de rede e de volume
+Abre colado embaixo da barra, alinhado ao ícone (12 px antes dele) e preso à borda direita do monitor. Não pega o foco; fecha com clique fora, Esc ou novo clique no ícone.
+- **Corner Style:** reto (0 px). **Shadow:** nenhuma.
+- **Tamanho:** 300 px de largura; altura pela soma das linhas.
+- **Background:** `fundo`. **Border:** 1 px `mudo` nos lados e embaixo; em cima fica a barra.
+- **Título (32 px):** nome em negrito `texto-forte` a 12 px da esquerda; à direita, o nível em `texto` misturado 30% ao `fundo`.
+- **Nível (32 px):** glifo de volume de 15 px (clique liga o mudo; `vermelho` no mudo), trilho de 6 px em `mudo` com a parte cheia em `destaque` (`texto-forte` no hover, `texto-escuro` no mudo) e número em `texto-forte` à direita.
+- **Rótulo de seção (26 px):** linha de 1 px `selecao` em cima e texto em minúsculas, `texto` misturado 45% ao `fundo`. O do Bluetooth tem 30 px, texto em `texto` e interruptor de 26×12 px à direita: ligado, caixa `destaque` com quadrado `fundo` à direita; desligado, caixa `mudo` com quadrado apagado à esquerda.
+- **Item (26 px):** glifo de 14 px numa coluna de 26 px, texto a partir de 40 px, detalhe à direita (IP, "conectado" em `destaque`, "conectando…" em `amarelo`, "desconectada" apagado) e marca `f00c` em `destaque` na saída padrão. Item escolhido: texto `texto-forte`, glifo `destaque`. Hover `fundo-claro`.
+- **Programa (22 px):** ícone da janela do programa (14 px) ou `f08c6`, nome apagado até 112 px e trilho de 4 px até a borda.
+- **Atalhos:** "Configurações de …" no pé, com linha `selecao` em cima, glifo `f0493` em `texto-escuro` e texto apagado.
 
 ### Cards / Containers (cartão de grupo)
 - **Corner Style:** reto (0 px).

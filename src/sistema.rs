@@ -144,13 +144,8 @@ pub fn barra_windows_escondida() -> bool {
 }
 
 
-fn abrir_uri(uri: PCWSTR) {
+pub fn abrir_uri(uri: PCWSTR) {
     unsafe { ShellExecuteW(None, w!("open"), uri, PCWSTR::null(), PCWSTR::null(), SW_SHOWNORMAL) };
-}
-
-/// Painel de rede, volume e brilho (o mesmo do Win+A).
-pub fn abrir_configuracoes_rapidas() {
-    abrir_uri(w!("ms-actioncenter:controlcenter/&suppressAnimations=false&showFooter=true&allowPageNavigation=true"));
 }
 
 /// Central de notificações com o calendário (o mesmo do Win+N).

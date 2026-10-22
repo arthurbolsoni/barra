@@ -21,8 +21,8 @@ const FONTE: PCWSTR = w!("CaskaydiaMono Nerd Font");
 
 // glifos da Nerd Font
 const G_MAIS: &str = "\u{f067}";
-const G_WIFI: &str = "\u{f05a9}";
-const G_VOLUME: &str = "\u{f057e}";
+/// Programa sem ícone no painel de volume.
+const G_PROGRAMA: &str = "\u{f08c6}";
 pub const G_TERMINAL: &str = "\u{f120}";
 pub const G_TECLADO: &str = "\u{f11c}";
 /// Grupo ativo, como o workspace ativo da Waybar do Omarchy.
@@ -49,7 +49,8 @@ pub enum Alvo {
     Grupo(usize),
     NovoGrupo,
     Janela(isize),
-    Sistema,
+    Rede,
+    Volume,
     Relogio,
 }
 
@@ -93,6 +94,72 @@ pub struct Cena {
     /// "terça-feira 20:25", no centro
     pub hora: String,
     pub bandeja: Vec<ItemBandeja>,
+    /// Glifo da rede e se tem conexão.
+    pub rede: (&'static str, bool),
+    /// (nível 0..1, mudo); None sem saída de som.
+    pub volume: Option<(f32, bool)>,
+    /// Rede ou volume com o painel aberto.
+    pub aberto: Option<Alvo>,
+}
+
+/// O que fica embaixo do cursor no painel de rede ou de volume.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum AlvoPainel {
+    Mudo,
+    Nivel,
+    Saida(usize),
+    Programa(usize),
+    Radio,
+    Bluetooth(usize),
+    Link(usize),
+}
+
+#[derive(Clone, Copy, PartialEq)]
+pub enum Tom {
+    Normal,
+    Destaque,
+    Apagado,
+    Amarelo,
+}
+
+/// Linhas do painel, de cima para baixo.
+pub enum LinhaPainel {
+    /// Nome do painel e, à direita, o nível.
+    Titulo { texto: String, dir: String },
+    /// Volume geral: glifo (clique liga o mudo), trilho e número.
+    Nivel { glifo: &'static str, mudo: bool, nivel: f32 },
+    /// Rótulo de seção com linha em cima; `chave` desenha o interruptor do Bluetooth.
+    Rotulo { texto: String, chave: Option<bool> },
+    Item { glifo: &'static str, texto: String, dir: String, tom: Tom, marcado: bool, sel: bool, alvo: Option<AlvoPainel>, separado: bool },
+    Programa { icone: HICON, nome: String, nivel: f32, mudo: bool, alvo: AlvoPainel },
+    Espaco(f32),
+}
+
+pub struct CenaPainel {
+    pub w: i32,
+    pub escala: f32,
+    pub linhas: Vec<LinhaPainel>,
+    pub hover: Option<AlvoPainel>,
+}
+
+pub type AlvosPainel = Vec<(D2D_RECT_F, AlvoPainel)>;
+
+impl LinhaPainel {
+    fn altura(&self) -> f32 {
+        match self {
+            LinhaPainel::Titulo { .. } | LinhaPainel::Nivel { .. } => 32.0,
+            LinhaPainel::Rotulo { chave: Some(_), .. } => 30.0,
+            LinhaPainel::Rotulo { .. } => 26.0,
+            LinhaPainel::Item { .. } => 26.0,
+            LinhaPainel::Programa { .. } => 22.0,
+            LinhaPainel::Espaco(e) => *e,
+        }
+    }
+}
+
+/// Altura do painel com estas linhas (com a borda de baixo).
+pub fn altura_painel(linhas: &[LinhaPainel], s: f32) -> i32 {
+    ((linhas.iter().map(|l| l.altura()).sum::<f32>() + 1.0) * s).ceil() as i32
 }
 
 /// Visão geral: um quadro por grupo, com as janelas no lugar delas. As miniaturas são do
@@ -363,7 +430,7 @@ impl Gfx {
         x = r.right + 14.0 * s;
 
         // janelas de todos os grupos, em ordem, com "|" entre um grupo e outro; a com foco
-        // ganha a linha do destaque embaixo
+        // fica com o fundo de seleção
         let lado = 16.0 * s;
         let celula = 28.0 * s;
         let meio = h / 2.0;
@@ -378,6 +445,8 @@ impl Gfx {
             let r = ret(x, 0.0, x + celula, h);
             if j.piscando {
                 self.preencher(r, cor(t.amarelo, 0.28))?;
+            } else if j.ativa {
+                self.preencher(r, cor(t.selecao, 1.0))?;
             } else if hover(Alvo::Janela(j.hwnd)) {
                 self.preencher(r, realce)?;
             }
@@ -386,16 +455,23 @@ impl Gfx {
             let apagado = if t.claro { 0.55 } else { 0.4 };
             match j.glifo {
                 // glifo monocromático na cor do texto (minimizada, apagado)
-                Some(g) => self.glifo(g, &f_glifo_janela, r, cor(if j.minimizada { mistura(t.texto, t.fundo, 0.5) } else { t.texto }, 1.0))?,
+                Some(g) => {
+                    let tinta = if j.minimizada {
+                        mistura(t.texto, t.fundo, 0.5)
+                    } else if j.ativa {
+                        t.texto_forte
+                    } else {
+                        t.texto
+                    };
+                    self.glifo(g, &f_glifo_janela, r, cor(tinta, 1.0))?
+                }
                 None => self.icone(j.icone, ri, if j.minimizada { apagado } else { 1.0 }),
             }
             if !j.selo.is_invalid() {
                 let l = 9.0 * s;
                 self.icone(j.selo, ret(ri.right - l * 0.6, ri.bottom - l * 0.7, ri.right + l * 0.4, ri.bottom + l * 0.3), 1.0);
             }
-            if j.ativa {
-                self.preencher(ret(r.left + 4.0 * s, h - 2.0 * s, r.right - 4.0 * s, h), cor(t.destaque, 1.0))?;
-            } else if j.piscando {
+            if j.piscando {
                 self.preencher(ret(r.left + 4.0 * s, h - 2.0 * s, r.right - 4.0 * s, h), cor(t.amarelo, 1.0))?;
             }
             // progresso (download, cópia): linha no alto da célula
@@ -417,14 +493,26 @@ impl Gfx {
         let fim_esquerda = x;
 
         // direita: rede e volume, e antes deles a bandeja dos outros programas
-        let rs = ret(w - 6.0 * s - 56.0 * s, 0.0, w - 6.0 * s, h);
-        if hover(Alvo::Sistema) {
-            self.preencher(rs, realce)?;
+        let celula_sis = 28.0 * s;
+        let rv = ret(w - 6.0 * s - celula_sis, 0.0, w - 6.0 * s, h);
+        let rs = ret(rv.left - celula_sis, 0.0, rv.left, h);
+        let (g_vol, vol_mudo) = match c.volume {
+            Some((n, m)) => (crate::audio::glifo(n, m), m),
+            None => (crate::audio::G_VOLUME_MUDO, true),
+        };
+        let sem_rede = mistura(t.texto, t.fundo, 0.3);
+        for (r, alvo, g, tinta) in [
+            (rs, Alvo::Rede, c.rede.0, if c.rede.1 { t.texto } else { sem_rede }),
+            (rv, Alvo::Volume, g_vol, if vol_mudo { t.vermelho } else { t.texto }),
+        ] {
+            let aberto = c.aberto == Some(alvo);
+            if aberto || hover(alvo) {
+                self.preencher(r, realce)?;
+            }
+            let tinta = if aberto && tinta == t.texto { t.texto_forte } else { tinta };
+            self.glifo(g, &f_glifo, r, cor(tinta, 1.0))?;
+            alvos.push((r, alvo));
         }
-        let ms = (rs.left + rs.right) / 2.0;
-        self.glifo(G_WIFI, &f_glifo, ret(rs.left, 0.0, ms, h), cor(t.texto, 1.0))?;
-        self.glifo(G_VOLUME, &f_glifo, ret(ms, 0.0, rs.right, h), cor(t.texto, 1.0))?;
-        alvos.push((rs, Alvo::Sistema));
         let mut xb = rs.left - 6.0 * s;
         for ic in c.bandeja.iter().rev() {
             let r = ret(xb - 24.0 * s, 0.0, xb, h);
@@ -451,6 +539,152 @@ impl Gfx {
             self.texto(&c.hora, &f_texto, rh, cor(t.texto, 1.0))?;
             alvos.push((rh, Alvo::Relogio));
         }
+        Ok(alvos)
+    }
+
+    /// Painel de rede ou de volume, preso embaixo do ícone: linhas de 26 px como as do menu,
+    /// trilhos retos em `destaque`, borda de 1 px em `mudo` nos lados e embaixo.
+    pub fn desenhar_painel(&mut self, dc: HDC, h: i32, c: &CenaPainel) -> Result<AlvosPainel> {
+        self.no_dc(dc, c.w, h, |g| g.conteudo_painel(c, h as f32))
+    }
+
+    fn conteudo_painel(&mut self, c: &CenaPainel, h: f32) -> Result<AlvosPainel> {
+        let t = self.tema;
+        let s = c.escala;
+        let w = c.w as f32;
+        let f_texto = self.formato(12.0 * s, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_TEXT_ALIGNMENT_LEADING)?;
+        let f_forte = self.formato(12.0 * s, DWRITE_FONT_WEIGHT_BOLD, DWRITE_TEXT_ALIGNMENT_LEADING)?;
+        let f_dir = self.formato(12.0 * s, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_TEXT_ALIGNMENT_TRAILING)?;
+        let f_glifo = self.formato(14.0 * s, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_TEXT_ALIGNMENT_CENTER)?;
+        let f_glifo_nivel = self.formato(15.0 * s, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_TEXT_ALIGNMENT_CENTER)?;
+        let apagado = mistura(t.texto, t.fundo, 0.3);
+        let rotulo = mistura(t.texto, t.fundo, 0.45);
+        let hover = |a: AlvoPainel| c.hover == Some(a);
+        let pad = 12.0 * s;
+        let mut alvos: AlvosPainel = Vec::new();
+
+        unsafe { self.rt.Clear(Some(&cor(t.fundo, 1.0))) };
+
+        let mut y = 0.0;
+        for l in &c.linhas {
+            let a = l.altura() * s;
+            let fim = y + a;
+            match l {
+                LinhaPainel::Titulo { texto, dir } => {
+                    let r = ret(pad, y + 2.0 * s, w - pad, fim);
+                    self.texto(texto, &f_forte, r, cor(t.texto_forte, 1.0))?;
+                    self.texto(dir, &f_dir, r, cor(apagado, 1.0))?;
+                }
+                LinhaPainel::Nivel { glifo, mudo, nivel } => {
+                    let meio = y + 13.0 * s;
+                    let (topo, base) = (meio - 13.0 * s, meio + 13.0 * s);
+                    let ri = ret(pad - 4.0 * s, topo, pad + 22.0 * s, base);
+                    if hover(AlvoPainel::Mudo) {
+                        self.preencher(ri, cor(t.fundo_claro, 1.0))?;
+                    }
+                    let tinta = if *mudo { t.vermelho } else { t.texto };
+                    self.glifo(glifo, &f_glifo_nivel, ri, cor(tinta, 1.0))?;
+                    alvos.push((ri, AlvoPainel::Mudo));
+                    let (l0, l1) = (40.0 * s, w - pad - 44.0 * s);
+                    let e = 3.0 * s;
+                    self.preencher(ret(l0, meio - e, l1, meio + e), cor(t.mudo, 1.0))?;
+                    let cheio = if *mudo { t.texto_escuro } else if hover(AlvoPainel::Nivel) { t.texto_forte } else { t.destaque };
+                    self.preencher(ret(l0, meio - e, l0 + (l1 - l0) * nivel.clamp(0.0, 1.0), meio + e), cor(cheio, 1.0))?;
+                    alvos.push((ret(l0, topo, l1, base), AlvoPainel::Nivel));
+                    let num = if *mudo { "mudo".to_string() } else { format!("{}%", (nivel * 100.0).round() as i32) };
+                    self.texto(&num, &f_dir, ret(l1, topo, w - pad, base), cor(t.texto_forte, 1.0))?;
+                }
+                LinhaPainel::Rotulo { texto, chave } => {
+                    self.preencher(ret(0.0, y, w, y + 1.0 * s), cor(t.selecao, 1.0))?;
+                    let r = ret(0.0, y + 1.0 * s, w, fim);
+                    if let Some(ligado) = chave {
+                        if hover(AlvoPainel::Radio) {
+                            self.preencher(r, cor(t.fundo_claro, 1.0))?;
+                        }
+                        let meio = (r.top + r.bottom) / 2.0;
+                        let (cl, cr) = (w - pad - 26.0 * s, w - pad);
+                        let caixa = ret(cl, meio - 6.0 * s, cr, meio + 6.0 * s);
+                        let q = 8.0 * s;
+                        if *ligado {
+                            self.preencher(caixa, cor(t.destaque, 1.0))?;
+                            self.preencher(ret(cr - 2.0 * s - q, meio - q / 2.0, cr - 2.0 * s, meio + q / 2.0), cor(t.fundo, 1.0))?;
+                        } else {
+                            self.preencher(caixa, cor(t.mudo, 1.0))?;
+                            self.preencher(ret(cl + 2.0 * s, meio - q / 2.0, cl + 2.0 * s + q, meio + q / 2.0), cor(apagado, 1.0))?;
+                        }
+                        alvos.push((r, AlvoPainel::Radio));
+                        self.texto(texto, &f_texto, ret(pad, r.top, cl - 8.0 * s, r.bottom), cor(t.texto, 1.0))?;
+                    } else {
+                        self.texto(texto, &f_texto, ret(pad, y + 6.0 * s, w - pad, fim), cor(rotulo, 1.0))?;
+                    }
+                }
+                LinhaPainel::Item { glifo, texto, dir, tom, marcado, sel, alvo, separado } => {
+                    let mut r = ret(0.0, y, w, fim);
+                    if *separado {
+                        self.preencher(ret(0.0, y, w, y + 1.0 * s), cor(t.selecao, 1.0))?;
+                        r.top += 1.0 * s;
+                    }
+                    if let Some(al) = alvo {
+                        if hover(*al) {
+                            self.preencher(r, cor(t.fundo_claro, 1.0))?;
+                        }
+                        alvos.push((r, *al));
+                    }
+                    let link = matches!(alvo, Some(AlvoPainel::Link(_)));
+                    let (tinta_g, tinta) = if *sel {
+                        (t.destaque, t.texto_forte)
+                    } else if link {
+                        (t.texto_escuro, apagado)
+                    } else {
+                        (apagado, t.texto)
+                    };
+                    self.glifo(glifo, &f_glifo, ret(pad - 4.0 * s, r.top, pad + 22.0 * s, r.bottom), cor(tinta_g, 1.0))?;
+                    let mut fim_texto = w - pad;
+                    if *marcado {
+                        self.glifo(G_MARCA, &f_glifo, ret(w - pad - 18.0 * s, r.top, w - pad, r.bottom), cor(t.destaque, 1.0))?;
+                        fim_texto -= 24.0 * s;
+                    }
+                    if !dir.is_empty() {
+                        let ld = self.largura(dir, &f_dir)?;
+                        let tom = match tom {
+                            Tom::Normal => t.texto,
+                            Tom::Destaque => t.destaque,
+                            Tom::Apagado => apagado,
+                            Tom::Amarelo => t.amarelo,
+                        };
+                        self.texto(dir, &f_dir, ret(fim_texto - ld - 2.0 * s, r.top, fim_texto, r.bottom), cor(tom, 1.0))?;
+                        fim_texto -= ld + 10.0 * s;
+                    }
+                    self.texto(texto, &f_texto, ret(40.0 * s, r.top, fim_texto, r.bottom), cor(tinta, 1.0))?;
+                }
+                LinhaPainel::Programa { icone, nome, nivel, mudo, alvo } => {
+                    let meio = (y + fim) / 2.0;
+                    let lado = 14.0 * s;
+                    let ri = ret(pad + 9.0 * s - lado / 2.0, meio - lado / 2.0, pad + 9.0 * s + lado / 2.0, meio + lado / 2.0);
+                    if icone.is_invalid() {
+                        self.glifo(G_PROGRAMA, &f_glifo, ret(pad - 4.0 * s, y, pad + 22.0 * s, fim), cor(apagado, 1.0))?;
+                    } else {
+                        self.icone(*icone, ri, 1.0);
+                    }
+                    self.texto(nome, &f_texto, ret(40.0 * s, y, 112.0 * s, fim), cor(apagado, 1.0))?;
+                    let (l0, l1) = (120.0 * s, w - pad);
+                    let e = 2.0 * s;
+                    self.preencher(ret(l0, meio - e, l1, meio + e), cor(t.mudo, 1.0))?;
+                    let cheio = if *mudo { t.texto_escuro } else if hover(*alvo) { t.texto_forte } else { t.destaque };
+                    self.preencher(ret(l0, meio - e, l0 + (l1 - l0) * nivel.clamp(0.0, 1.0), meio + e), cor(cheio, 1.0))?;
+                    alvos.push((ret(l0, y, l1, fim), *alvo));
+                }
+                LinhaPainel::Espaco(_) => {}
+            }
+            y = fim;
+        }
+
+        // borda: lados e embaixo (em cima fica a barra)
+        let b = cor(t.mudo, 1.0);
+        let e = 1.0 * s;
+        self.preencher(ret(0.0, 0.0, e, h), b)?;
+        self.preencher(ret(w - e, 0.0, w, h), b)?;
+        self.preencher(ret(0.0, h - e, w, h), b)?;
         Ok(alvos)
     }
 
