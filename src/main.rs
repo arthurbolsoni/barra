@@ -4,6 +4,7 @@ mod appbar;
 mod audio;
 mod bluetooth;
 mod bandeja;
+mod cores_do_windows;
 mod desenho;
 mod grupos;
 mod janelas;
@@ -168,6 +169,7 @@ fn atualizar(st: &mut Estado) {
     } else {
         menus_externos::desligar();
     }
+    cores_do_windows::aplicar(st.gfx.tema);
     for h in atuais {
         if !st.mru.contains(&h) {
             st.mru.push(h);
@@ -1232,6 +1234,7 @@ const MENU_SAIR: usize = 23;
 const MENU_ALT_TAB: usize = 24;
 const MENU_VISAO: usize = 25;
 const MENU_MOLDURAS: usize = 26;
+const MENU_CORES: usize = 27;
 const MENU_MOVER: usize = 100;
 /// Entrada de submenu (não é escolhida; só abre o submenu).
 const MENU_SUBMENU: usize = 1;
@@ -1314,6 +1317,7 @@ fn clicar_direito(alvo: Option<Alvo>) {
             let Some(m) = montar_menu(&[
                 (MENU_VISAO, "Abrir a visão geral	Win+Tab".into(), false, true),
                 (MENU_MOLDURAS, "Aplicar o tema às janelas e aos menus dos outros programas".into(), molduras::ligadas(), true),
+                (MENU_CORES, "Aplicar o tema às cores do Windows".into(), cores_do_windows::ligadas(), true),
                 (0, String::new(), false, true),
                 (MENU_ESCONDER, "Ocultar a barra de tarefas do Windows".into(), esconder, true),
                 (MENU_ALT_TAB, "Usar Alt+Tab para a visão geral".into(), alt_tab, true),
@@ -1343,6 +1347,12 @@ fn clicar_direito(alvo: Option<Alvo>) {
                     let ligar = !molduras::ligadas();
                     sistema::gravar(molduras::PREF, Some(ligar as u32));
                     molduras::ligar(ligar);
+                    _ = com(atualizar);
+                }
+                MENU_CORES => {
+                    let ligar = !cores_do_windows::ligadas();
+                    sistema::gravar(cores_do_windows::PREF, Some(ligar as u32));
+                    cores_do_windows::ligar(ligar);
                     _ = com(atualizar);
                 }
                 MENU_ESCONDER => {
@@ -1383,6 +1393,7 @@ fn limpar() {
     bandeja::desligar();
     menus_externos::desligar();
     molduras::restaurar();
+    cores_do_windows::restaurar();
     _ = com(|st| appbar::remover(st.barra));
     if sistema::barra_windows_escondida() {
         sistema::mostrar_barra_windows();
@@ -2017,10 +2028,14 @@ fn main() -> Result<()> {
 
         // a barra anterior morreu com janelas estacionadas: traz de volta antes de tudo
         grupos::recuperar();
+        if !cores_do_windows::ligadas() {
+            cores_do_windows::restaurar();
+        }
         std::panic::set_hook(Box::new(|_| {
             grupos::trazer_todas_de_volta();
             sistema::mostrar_barra_windows();
             molduras::restaurar();
+            cores_do_windows::restaurar();
         }));
 
         let instancia = GetModuleHandleW(PCWSTR::null())?;

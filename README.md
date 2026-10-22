@@ -15,7 +15,7 @@ Só as janelas do grupo ativo ficam na tela. As dos outros grupos ficam estacion
 | Rede | painel de rede e Bluetooth | | |
 | Volume | painel de volume | | sobe/desce 2% (clique do meio: mudo) |
 | Relógio | notificações e calendário (Win+N) | | |
-| Espaço vazio | | visão geral, esconder a barra do Windows, Alt+Tab abre a visão geral, iniciar com o Windows, juntar tudo num grupo, sair | |
+| Espaço vazio | | visão geral, tema, tema nas janelas dos outros programas, tema nas cores do Windows, esconder a barra do Windows, Alt+Tab abre a visão geral, iniciar com o Windows, juntar tudo num grupo, sair | |
 
 - Janela nova entra no grupo ativo. Ao abrir a barra, tudo o que está aberto vai para o grupo 1.
 - Janela de outro grupo que vem para a frente troca para o grupo dela.
@@ -48,6 +48,13 @@ Abre com Alt+Tab, Win+Tab ou pelo menu da barra. Mostra todos os grupos ao mesmo
 "Esconder a barra do Windows" (ligado por padrão) passa a barra dele para ocultar automaticamente e a esconde. Os ícones da bandeja dos outros programas vêm para a barra pelo mesmo truque do ManagedShell/RetroBar: uma janela `Shell_TrayWnd` invisível, à frente da do Explorer, recebe os `Shell_NotifyIcon` e repassa tudo ao Explorer. A propriedade `TaskbandHWND` nela recebe progresso e selo do `ITaskbarList3`.
 
 Ao sair, a barra do Windows volta como estava (estado guardado em `HKCU\Software\barra`) e os programas mandam os ícones de novo para ela.
+
+## Cores do Windows
+
+"Aplicar o tema às cores do Windows" (ligado por padrão) troca a cor de destaque do Windows pela `destaque` do tema e o modo claro ou escuro pelo do tema. Os programas que seguem o Windows (Configurações, Explorador, apps WinUI, navegadores) trocam na hora. A cor vai pelo mesmo caminho das Configurações (`SetUserColorPreference` da uxtheme), e o Windows gera a paleta de destaque a partir dela.
+
+- A política "Forçar uma cor de fundo e de destaque" (`PersonalColors_*` em `HKLM\Software\Policies\Microsoft\Windows\Personalization`) faz o Windows ignorar a troca. Enquanto o tema está aplicado, ela fica desligada, o que exige a barra rodando como administrador.
+- Os valores de antes ficam em `HKCU\Software\barra\CoresDoWindows` e voltam ao sair, ao desligar a opção e, depois de uma queda, na próxima saída.
 
 ## Segurança das janelas estacionadas
 

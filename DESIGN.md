@@ -141,7 +141,7 @@ A barra é a Waybar do Omarchy (Hyprland) levada para o Windows 11: uma faixa de
 
 A densidade é de ferramenta de desenvolvedor: tudo em 12 px, peso como único eixo de hierarquia dentro da barra, estado marcado por cor do tema e por linhas de 2 px. A visão geral reproduz os quadros do Hyprland: cada grupo é um quadro de borda reta de 2 px com as miniaturas ao vivo do DWM no lugar onde as janelas ficam na tela, separado dos vizinhos por vãos de 10 px.
 
-O mesmo vocabulário sai da barra e chega às janelas de outros programas: barra de título na cor de fundo do tema, com o título na cor de texto e os botões de minimizar, maximizar e fechar em glifos do tema, sem ícone; borda de destaque na janela em foco e apagada nas outras; cantos retos.
+O mesmo vocabulário sai da barra e chega às janelas de outros programas: barra de título na cor de fundo do tema, com o título na cor de texto e os botões de minimizar, maximizar e fechar em glifos do tema, sem ícone; borda de destaque na janela em foco e apagada nas outras; cantos retos. A cor de destaque e o modo claro ou escuro do Windows também passam a ser os do tema.
 
 **Key Characteristics:**
 - Faixa de 26 px no topo, como AppBar; todas as medidas multiplicadas pela escala de DPI.
