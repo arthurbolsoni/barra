@@ -304,6 +304,18 @@ fn aplicar(i: &mut Icone, nid: &Nid32, tam: u32) {
 fn notificacao(d: &DadosBandeja, tam_nid: u32) -> bool {
     let nid = &d.nid;
     let guid = (nid.flags & NIF_GUID != 0 && tam_nid >= NID_COM_GUID).then_some(nid.guid);
+    if std::env::var_os("BARRA_LOG").is_some() {
+        // diagnóstico: cada Shell_NotifyIcon que chega, com o programa dono
+        let mut pid = 0u32;
+        unsafe { GetWindowThreadProcessId(HWND(nid.hwnd as isize as *mut _), Some(&mut pid)) };
+        let linha = format!("msg={} pid={} id={} flags={:#x} guid={:?} tam={} dica={}
+", d.mensagem, pid, nid.id, nid.flags, guid.is_some(), tam_nid, texto(&nid.dica));
+        let caminho = std::env::temp_dir().join("barra-bandeja.log");
+        if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(caminho) {
+            use std::io::Write;
+            _ = f.write_all(linha.as_bytes());
+        }
+    }
     BANDEJA.with_borrow_mut(|b| {
         let pos = b.icones.iter().position(|i| mesmo(i, nid, guid));
         match (d.mensagem, pos) {
