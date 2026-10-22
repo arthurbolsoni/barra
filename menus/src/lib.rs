@@ -304,19 +304,24 @@ fn menus() -> std::sync::MutexGuard<'static, Vec<MenuConvertido>> {
     MENUS.lock().unwrap_or_else(|e| e.into_inner())
 }
 
-/// Converte os itens do menu em desenho próprio. Se já estava convertido (pela criação da
-/// janela do menu, antes do WM_INITMENUPOPUP), desfaz e converte de novo: o programa pode ter
-/// acrescentado itens no meio.
+/// Converte os itens do menu em desenho próprio. Pode ser chamado mais de uma vez para o mesmo
+/// menu (WM_INITMENUPOPUP e MN_SIZEWINDOW): o que já foi convertido fica, e só itens que o
+/// programa acrescentou depois são convertidos.
 unsafe fn converter(menu: HMENU, dono: HWND) {
     if menu.is_invalid() || dono.is_invalid() {
         return;
     }
-    devolver(menu);
     let n = GetMenuItemCount(Some(menu));
     if n <= 0 {
         return;
     }
-    let mut itens = Vec::with_capacity(n as usize);
+    let ja = {
+        let mut v = menus();
+        v.iter().position(|m| m.menu == menu.0 as isize).map(|i| v.remove(i).itens)
+    };
+    let novo = ja.is_none();
+    let mut itens = ja.unwrap_or_default();
+    let antes = itens.len();
     for pos in 0..n as u32 {
         let mut texto = [0u16; 512];
         let mut mii = MENUITEMINFOW {
@@ -327,11 +332,18 @@ unsafe fn converter(menu: HMENU, dono: HWND) {
             ..Default::default()
         };
         if GetMenuItemInfoW(menu, pos, true, &mut mii).is_err() {
-            return;
+            break;
+        }
+        let ownerdraw = mii.fType.0 & MFT_OWNERDRAW.0 != 0;
+        if !novo && ownerdraw {
+            continue; // já convertido por nós
         }
         // o programa já desenha (ou pede para desenhar) este menu: fica como está
-        if mii.fType.0 & (MFT_OWNERDRAW.0 | MFT_BITMAP.0) != 0 || mii.hbmpItem == HBMMENU_CALLBACK {
-            return;
+        if ownerdraw || mii.fType.0 & MFT_BITMAP.0 != 0 || mii.hbmpItem == HBMMENU_CALLBACK {
+            if novo {
+                return;
+            }
+            continue;
         }
         let len = (mii.cch as usize).min(texto.len() - 1);
         itens.push(Item {
@@ -343,7 +355,7 @@ unsafe fn converter(menu: HMENU, dono: HWND) {
             submenu: mii.hSubMenu.0 as isize,
         });
     }
-    for it in &itens {
+    for it in &itens[antes..] {
         let mii = MENUITEMINFOW {
             cbSize: size_of::<MENUITEMINFOW>() as u32,
             fMask: MIIM_FTYPE,
@@ -352,8 +364,10 @@ unsafe fn converter(menu: HMENU, dono: HWND) {
         };
         _ = SetMenuItemInfoW(menu, it.pos, true, &mii);
     }
-    // fundo do tema também nas margens do menu
-    fundo_do_menu(menu, true);
+    if novo {
+        // fundo do tema também nas margens do menu
+        fundo_do_menu(menu, true);
+    }
     menus().push(MenuConvertido { menu: menu.0 as isize, itens });
     prender();
     _ = SetWindowSubclass(dono, Some(proc_dono), 0xBA02, 0);
