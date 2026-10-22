@@ -28,8 +28,6 @@ struct Aplicada {
     escuro_antes: u32,
     /// Terminal: ícones (grande, pequeno) de antes de trocar pelo glifo do tema.
     icone_antes: Option<(isize, isize)>,
-    /// Terminal: estilo de antes de tirar a barra de título (no Omarchy o terminal não tem).
-    estilo_antes: Option<isize>,
 }
 
 struct Molduras {
@@ -77,27 +75,7 @@ fn trocar_icone(h: HWND, grande: isize, pequeno: isize) -> (isize, isize) {
     }
 }
 
-/// Tira a barra de título (WS_CAPTION) e devolve o estilo de antes; None se já estava sem.
-fn tirar_titulo(h: HWND) -> Option<isize> {
-    unsafe {
-        let estilo = GetWindowLongPtrW(h, GWL_STYLE);
-        let titulo = WS_CAPTION.0 as isize;
-        if estilo & titulo != titulo {
-            return None;
-        }
-        SetWindowLongPtrW(h, GWL_STYLE, estilo & !titulo);
-        _ = SetWindowPos(h, None, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
-        Some(estilo)
-    }
-}
-
 fn devolver(h: HWND, a: &Aplicada) {
-    if let Some(estilo) = a.estilo_antes {
-        unsafe {
-            SetWindowLongPtrW(h, GWL_STYLE, estilo);
-            _ = SetWindowPos(h, None, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
-        }
-    }
     definir(h, DWMWA_CAPTION_COLOR, COR_PADRAO);
     definir(h, DWMWA_TEXT_COLOR, COR_PADRAO);
     definir(h, DWMWA_BORDER_COLOR, COR_PADRAO);
@@ -133,7 +111,7 @@ pub fn sincronizar(tema: &'static Tema, atuais: &[isize], frente: isize, icones:
         m.janelas.retain(|&j, _| existe(j));
         for &j in atuais {
             let f = j == frente;
-            let a = m.janelas.entry(j).or_insert_with(|| Aplicada { tema: "", frente: !f, escuro_antes: ler_escuro(hwnd(j)), icone_antes: None, estilo_antes: None });
+            let a = m.janelas.entry(j).or_insert_with(|| Aplicada { tema: "", frente: !f, escuro_antes: ler_escuro(hwnd(j)), icone_antes: None });
             let tema_mudou = a.tema != tema.nome;
             if tema_mudou || a.frente != f {
                 pintar(hwnd(j), tema, f);
@@ -145,13 +123,6 @@ pub fn sincronizar(tema: &'static Tema, atuais: &[isize], frente: isize, icones:
                 if tema_mudou || a.icone_antes.is_none() {
                     let antes = trocar_icone(hwnd(j), grande.0 as isize, pequeno.0 as isize);
                     a.icone_antes.get_or_insert(antes);
-                }
-            }
-            // terminal sem barra de título, como no Omarchy: só a borda do tema. Confere a cada
-            // passada porque o console põe o título de volta em algumas trocas de modo.
-            if crate::janelas::terminal(hwnd(j)) {
-                if let Some(antes) = tirar_titulo(hwnd(j)) {
-                    a.estilo_antes.get_or_insert(antes);
                 }
             }
         }

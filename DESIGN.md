@@ -270,7 +270,7 @@ Só ícone, sem título.
 Texto de 12 px em `texto`, centralizado, itens no formato "Tecla: ação" separados por "  ·  ". Win+Tab e Alt+Tab têm listas próprias. Com filtro ativo, a linha vira "Filtro: {texto}" em `destaque`.
 
 ### Moldura das outras janelas
-Aplicada pelo DWM, sem injeção: modo escuro conforme o tema, barra de título `fundo`, texto `texto`, borda `destaque` na janela em primeiro plano e `mudo` nas outras, cantos retos. Terminais ficam sem barra de título (o estilo `WS_CAPTION` sai), como no Omarchy: só a borda do tema. O ícone deles vira o glifo `>_` (`f120`), que aparece no Alt+Tab e onde o Windows ainda mostra o ícone. Tudo volta ao padrão do Windows ao desligar a opção ou sair.
+Aplicada pelo DWM, sem injeção: modo escuro conforme o tema, barra de título `fundo`, texto `texto`, borda `destaque` na janela em primeiro plano e `mudo` nas outras, cantos retos. Terminais recebem como ícone da barra de título o glifo `>_` (`f120`) em negrito, na cor `texto`, gerado em 16 e 32 px. Tudo volta ao padrão do Windows ao desligar a opção ou sair.
 
 ### Menus
 Menus de contexto do Win32 (teclado, submenus e posição do Windows), com os itens desenhados pela barra no tema.
