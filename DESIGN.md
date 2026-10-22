@@ -282,7 +282,7 @@ Menus de contexto do Win32 (teclado, submenus e posição do Windows), com os it
 - **Separador:** linha de 1 px em `mudo`, recuada 10 px, em item de 9 px.
 - **Textos:** infinitivo ou imperativo formal: "Criar grupo", "Renomear grupo", "Mover para o grupo", "Fechar janela", "Aplicar o tema às bordas das janelas", "Sair".
 
-Menus de outros programas (bandeja, menu de sistema das janelas) continuam com o visual do Windows.
+Menus de outros programas (bandeja, clique direito, menu de sistema) usam o modo claro ou escuro do Windows conforme o tema: a barra instala um gancho global e a `barra_menus.dll` chama o `SetPreferredAppMode` do uxtheme em cada programa. As cores são as do Windows, não as do tema; programas de 32 bits e os que rodam como administrador ficam de fora.
 
 ### Caixa de renomear grupo
 Campo de texto do Win32 sobre o cabeçalho do cartão: JetBrainsMono Nerd Font 12 px em negrito, `texto-forte` sobre `fundo-claro`.

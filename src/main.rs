@@ -5,6 +5,7 @@ mod bandeja;
 mod desenho;
 mod grupos;
 mod janelas;
+mod menus_externos;
 mod molduras;
 mod sistema;
 mod tema;
@@ -145,6 +146,12 @@ fn atualizar(st: &mut Estado) {
         st.icone_terminal = desenho::icone_de_glifo(desenho::G_TERMINAL, tam * 2, cor).zip(desenho::icone_de_glifo(desenho::G_TERMINAL, tam, cor)).map(|(g, p)| (st.gfx.tema.nome, g, p));
     }
     molduras::sincronizar(st.gfx.tema, &atuais, primeiro_plano(), st.icone_terminal.map(|(_, g, p)| (g, p)));
+    // menus dos outros programas no modo claro ou escuro do tema, junto com as molduras
+    if molduras::ligadas() {
+        menus_externos::ligar(st.gfx.tema.claro);
+    } else {
+        menus_externos::desligar();
+    }
     for h in atuais {
         if !st.mru.contains(&h) {
             st.mru.push(h);
@@ -907,7 +914,7 @@ fn clicar_direito(alvo: Option<Alvo>) {
             let alt_tab = teclado::ALT_TAB.load(Ordering::Relaxed);
             let Some(m) = montar_menu(&[
                 (MENU_VISAO, "Abrir a visão geral	Win+Tab".into(), false, true),
-                (MENU_MOLDURAS, "Aplicar o tema às bordas das janelas".into(), molduras::ligadas(), true),
+                (MENU_MOLDURAS, "Aplicar o tema às bordas e aos menus dos outros programas".into(), molduras::ligadas(), true),
                 (0, String::new(), false, true),
                 (MENU_ESCONDER, "Ocultar a barra de tarefas do Windows".into(), esconder, true),
                 (MENU_ALT_TAB, "Usar Alt+Tab para a visão geral".into(), alt_tab, true),
@@ -975,6 +982,7 @@ fn limpar() {
     fechar_visao(false);
     grupos::trazer_todas_de_volta();
     bandeja::desligar();
+    menus_externos::desligar();
     molduras::restaurar();
     _ = com(|st| appbar::remover(st.barra));
     if sistema::barra_windows_escondida() {
