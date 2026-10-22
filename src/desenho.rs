@@ -25,6 +25,8 @@ const G_WIFI: &str = "\u{f05a9}";
 const G_VOLUME: &str = "\u{f057e}";
 pub const G_TERMINAL: &str = "\u{f120}";
 pub const G_TECLADO: &str = "\u{f11c}";
+/// Grupo ativo, como o workspace ativo da Waybar do Omarchy.
+const G_GRUPO_ATIVO: &str = "\u{f14fb}";
 const G_MARCA: &str = "\u{f00c}";
 const G_SETA: &str = "\u{f105}";
 
@@ -55,6 +57,8 @@ pub struct ItemGrupo {
     pub nome: String,
     pub qtd: usize,
     pub ativo: bool,
+    /// Renomeado por quem usa: mostra o nome mesmo ativo (sem nome, o ativo vira o glifo).
+    pub proprio: bool,
 }
 
 pub struct ItemJanela {
@@ -185,7 +189,8 @@ impl Gfx {
                 dpiY: 96.0,
                 ..Default::default()
             })?;
-            rt.SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_CLEARTYPE);
+            // tons de cinza, como no Omarchy: o ClearType deixa franja colorida nas letras
+            rt.SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE);
             Ok(rt)
         }
     }
@@ -215,12 +220,9 @@ impl Gfx {
         Ok(())
     }
 
-    /// Glifo da Nerd Font: sem ClearType, que deixa franja colorida nos traços finos.
+    /// Glifo da Nerd Font (mesmo desenho do texto, separado para ler melhor onde é ícone).
     fn glifo(&self, s: &str, f: &IDWriteTextFormat, r: D2D_RECT_F, c: D2D1_COLOR_F) -> Result<()> {
-        unsafe { self.rt.SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE) };
-        let feito = self.texto(s, f, r, c);
-        unsafe { self.rt.SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_CLEARTYPE) };
-        feito
+        self.texto(s, f, r, c)
     }
 
     fn largura(&self, s: &str, f: &IDWriteTextFormat) -> Result<f32> {
@@ -320,7 +322,6 @@ impl Gfx {
         let s = c.escala;
         let (w, h) = (c.w as f32, c.h as f32);
         let f_texto = self.formato(12.0 * s, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_TEXT_ALIGNMENT_CENTER)?;
-        let f_ativo = self.formato(12.0 * s, DWRITE_FONT_WEIGHT_BOLD, DWRITE_TEXT_ALIGNMENT_CENTER)?;
         let f_glifo = self.formato(14.0 * s, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_TEXT_ALIGNMENT_CENTER)?;
         let f_glifo_janela = self.formato(16.0 * s, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_TEXT_ALIGNMENT_CENTER)?;
         let mut alvos: Alvos = Vec::new();
@@ -329,24 +330,25 @@ impl Gfx {
 
         unsafe { self.rt.Clear(Some(&cor(t.fundo, 1.0))) };
 
-        // grupos, como os workspaces da Waybar: só o nome; ativo no destaque, vazio apagado
+        // grupos, como os workspaces da Waybar do Omarchy: o número, e o ativo vira o glifo
+        // 󱓻 (grupo renomeado mostra o nome); vazio apagado
         let mut x = 6.0 * s;
         for (i, g) in c.grupos.iter().enumerate() {
-            let fonte = if g.ativo { &f_ativo } else { &f_texto };
-            let larg = self.largura(&g.nome, fonte)?.max(7.0 * s) + 14.0 * s;
+            let rotulo = if g.ativo && !g.proprio { G_GRUPO_ATIVO } else { g.nome.as_str() };
+            let larg = self.largura(rotulo, &f_texto)?.max(7.0 * s) + 14.0 * s;
             let r = ret(x, 0.0, x + larg, h);
             if hover(Alvo::Grupo(i)) && !g.ativo {
                 self.preencher(r, realce)?;
             }
             let tinta = if g.ativo {
-                cor(t.destaque, 1.0)
+                cor(t.texto_forte, 1.0)
             } else if g.qtd == 0 {
                 // apagado, mas legível (texto_escuro fica abaixo de 3:1 em vários temas)
                 cor(mistura(t.texto, t.fundo, 0.3), 1.0)
             } else {
                 cor(t.texto, 1.0)
             };
-            self.texto(&g.nome, fonte, r, tinta)?;
+            self.texto(rotulo, &f_texto, r, tinta)?;
             alvos.push((r, Alvo::Grupo(i)));
             x = r.right;
         }

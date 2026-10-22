@@ -183,7 +183,7 @@ fn fonte(dpi: u32, negrito: bool) -> HFONT {
         CreateFontW(
             -(((12 * dpi + 48) / 96) as i32), 0, 0, 0,
             if negrito { FW_BOLD.0 as i32 } else { FW_NORMAL.0 as i32 },
-            0, 0, 0, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, 0,
+            0, 0, 0, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, ANTIALIASED_QUALITY, 0,
             w!("JetBrainsMono NF"),
         )
     };

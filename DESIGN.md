@@ -177,18 +177,18 @@ A paleta é um conjunto de papéis, não de valores: os hex abaixo são os do te
 
 **Character:** Monoespaçada de terminal, a mesma da Waybar do Omarchy. Hierarquia por peso, quase nunca por tamanho.
 
-DirectWrite com localidade `pt-br`, sem quebra de linha, corte por caractere com reticências ("…"), alinhamento vertical centralizado no retângulo. Texto usa antisserrilhado ClearType; glifos da Nerd Font usam escala de cinza para não ganhar franja colorida nos traços finos.
+DirectWrite com localidade `pt-br`, sem quebra de linha, corte por caractere com reticências ("…"), alinhamento vertical centralizado no retângulo. Texto e glifos usam antisserrilhado em escala de cinza, como no Omarchy (o ClearType deixa franja colorida); nos menus desenhados pelo GDI, a fonte é criada com `ANTIALIASED_QUALITY` e o nome de família "JetBrainsMono NF".
 
 ### Hierarchy
 - **Headline** (negrito, 15 px): título da visão geral, a janela escolhida. Único texto acima de 12 px fora do cartão "Criar grupo".
-- **Title** (negrito, 12 px): grupo ativo na barra e nome do grupo no cabeçalho do cartão.
+- **Title** (negrito, 12 px): nome do grupo no cabeçalho do cartão.
 - **Body** (normal, 12 px): grupos, relógio, dica, linha de atalhos da visão geral, contagem de janelas, títulos nas faixas e rótulos.
 - **Label cartão** (normal, 13 px): "+  Criar grupo" no cartão de novo grupo.
 - **Glifo sistema** (normal, 14 px): rede, volume e glifos da bandeja.
 - **Glifo janela** (normal, 16 px): glifo que substitui o ícone do programa na barra, do mesmo tamanho do ícone.
 
 ### Named Rules
-**A Regra da Fonte Única.** Texto, número e ícone de sistema saem da JetBrainsMono Nerd Font. O peso negrito é o sinal de "ativo"; o tamanho só sobe no título da visão geral.
+**A Regra da Fonte Única.** Texto, número e ícone de sistema saem da JetBrainsMono Nerd Font. O negrito marca "ativo" nos cartões da visão geral e nos itens marcados dos menus; na barra não há negrito. O tamanho só sobe no título da visão geral.
 
 **A Regra do Glifo Monocromático.** Glifos da Nerd Font (`f067` mais, `f05a9` rede, `f057e` volume, `f120` terminal, `f11c` teclado, `f0e4` Gerenciador de Tarefas) são desenhados numa cor de papel do tema, nunca coloridos. Eles substituem o ícone colorido apenas do Gerenciador de Tarefas, dos terminais (Windows Terminal, conhost, OpenConsole, wt, pwsh, powershell, cmd) e do AutoHotkey; os outros programas mantêm o próprio ícone.
 
@@ -222,7 +222,7 @@ Retângulos de canto vivo (0 px) em tudo: células da barra, dica, cartões, qua
 ### Navigation (grupos na barra)
 Nomes de grupo como os workspaces da Waybar: só texto, sem fundo.
 - **Padrão:** `texto`, normal.
-- **Ativo:** `destaque`, negrito; não recebe realce de hover.
+- **Ativo:** glifo `f14fb` (󱓻) no lugar do número, em `texto-forte`, como o workspace ativo da Waybar do Omarchy; grupo renomeado mostra o nome. Não recebe realce de hover.
 - **Vazio:** `texto-apagado`.
 - **Hover:** fundo `fundo-claro` na célula inteira.
 - **"+":** glifo em `texto-apagado` numa célula de 24 px; mesmo hover.
@@ -242,7 +242,7 @@ Só ícone, sem título.
 ### Bandeja, sistema e relógio
 - **Bandeja:** ícones de 16 px (ou glifo de 14 px em `texto`) em células de 24 px; hover `fundo-claro`.
 - **Sistema:** glifos de rede e volume, 14 px, `texto`.
-- **Relógio:** "{dia da semana}, HH:MM" em minúsculas, `texto`, 12 px; dica com a data por extenso ("terça-feira, 21 de outubro de 2026").
+- **Relógio:** "{Dia da semana} HH:MM" ("Quarta-feira 23:22"), dia com inicial maiúscula e sem vírgula, como o "Friday 12:13" do Omarchy; `texto`, 12 px. Dica com a data por extenso ("Terça-feira, 21 de outubro de 2026").
 
 ### Dica (tooltip)
 - **Corner Style:** reto (0 px).
@@ -270,7 +270,7 @@ Só ícone, sem título.
 Texto de 12 px em `texto`, centralizado, itens no formato "Tecla: ação" separados por "  ·  ". Win+Tab e Alt+Tab têm listas próprias. Com filtro ativo, a linha vira "Filtro: {texto}" em `destaque`.
 
 ### Moldura das outras janelas
-Aplicada pelo DWM, sem injeção: modo escuro conforme o tema, barra de título `fundo`, texto `texto`, borda `destaque` na janela em primeiro plano e `mudo` nas outras, cantos retos. Terminais recebem como ícone da barra de título o glifo `>_` (`f120`) em negrito, na cor `texto`, gerado em 16 e 32 px. Tudo volta ao padrão do Windows ao desligar a opção ou sair.
+Aplicada pelo DWM, sem injeção: modo escuro conforme o tema, barra de título `fundo`, texto `texto`, borda `destaque` na janela em primeiro plano e `mudo` nas outras, cantos retos. Terminais ficam sem barra de título (o estilo `WS_CAPTION` sai), como no Omarchy: só a borda do tema. O ícone deles vira o glifo `>_` (`f120`), que aparece no Alt+Tab e onde o Windows ainda mostra o ícone. Tudo volta ao padrão do Windows ao desligar a opção ou sair.
 
 ### Menus
 Menus de contexto do Win32 (teclado, submenus e posição do Windows), com os itens desenhados pela barra no tema.
@@ -291,7 +291,7 @@ Campo de texto do Win32 sobre o cabeçalho do cartão: JetBrainsMono Nerd Font 1
 
 ### Do:
 - **Tire** toda cor de um papel do `Tema` ativo e confira a tela em pelo menos um tema claro (catppuccin-latte, flexoki-light, lupine, rose-pine, white).
-- **Use** JetBrainsMono Nerd Font em 12 px para texto novo, com negrito para "ativo"; o único tamanho maior é o título de 15 px da visão geral.
+- **Use** JetBrainsMono Nerd Font em 12 px para texto novo, com negrito para "ativo" fora da barra; o único tamanho maior é o título de 15 px da visão geral.
 - **Marque** foco e seleção com `destaque` em linha ou borda de 2 px.
 - **Use** `texto` misturado 30% com `fundo` para estado apagado.
 - **Multiplique** toda medida pela escala de DPI.

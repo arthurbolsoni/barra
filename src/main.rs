@@ -44,7 +44,7 @@ const WM_APPBAR: u32 = WM_APP + 1;
 const WM_PRIMEIRO_PLANO: u32 = WM_APP + 2;
 const WM_RENOMEAR: u32 = WM_APP + 3;
 const TIMER: usize = 1;
-const DIAS: [&str; 7] = ["domingo", "segunda-feira", "terça-feira", "quarta-feira", "quinta-feira", "sexta-feira", "sábado"];
+const DIAS: [&str; 7] = ["Domingo", "Segunda-feira", "Terça-feira", "Quarta-feira", "Quinta-feira", "Sexta-feira", "Sábado"];
 const MESES: [&str; 12] = [
     "janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro",
 ];
@@ -186,7 +186,7 @@ fn cena(st: &mut Estado, w: i32, h: i32) -> Cena {
         .lista
         .iter()
         .enumerate()
-        .map(|(i, g)| ItemGrupo { nome: g.nome.clone(), qtd: g.janelas.len(), ativo: i == ativo })
+        .map(|(i, g)| ItemGrupo { nome: g.nome.clone(), qtd: g.janelas.len(), ativo: i == ativo, proprio: g.nome_proprio })
         .collect();
     let lista = st.grupos.lista[ativo].janelas.clone();
     let janelas = lista
@@ -213,7 +213,7 @@ fn cena(st: &mut Estado, w: i32, h: i32) -> Cena {
         grupos,
         janelas,
         hover: st.hover,
-        hora: format!("{}, {:02}:{:02}", DIAS[t.wDayOfWeek as usize % 7], t.wHour, t.wMinute),
+        hora: format!("{} {:02}:{:02}", DIAS[t.wDayOfWeek as usize % 7], t.wHour, t.wMinute),
         bandeja: bandeja::visiveis().into_iter().map(|(indice, icone, _, dono)| ItemBandeja { indice, icone, glifo: janelas::glifo(hwnd(dono)) }).collect(),
     }
 }
@@ -586,7 +586,7 @@ fn comecar_renomear(g: usize) {
         // mesma letra do nome do grupo no cabeçalho do cartão
         let fonte = CreateFontW(
             -(12.0 * s) as i32, 0, 0, 0, FW_BOLD.0 as i32, 0, 0, 0,
-            DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, 0,
+            DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, ANTIALIASED_QUALITY, 0,
             w!("JetBrainsMono NF"),
         );
         SendMessageW(e, WM_SETFONT, Some(WPARAM(fonte.0 as usize)), Some(LPARAM(1)));
@@ -914,7 +914,7 @@ fn clicar_direito(alvo: Option<Alvo>) {
             let alt_tab = teclado::ALT_TAB.load(Ordering::Relaxed);
             let Some(m) = montar_menu(&[
                 (MENU_VISAO, "Abrir a visão geral	Win+Tab".into(), false, true),
-                (MENU_MOLDURAS, "Aplicar o tema às bordas e aos menus dos outros programas".into(), molduras::ligadas(), true),
+                (MENU_MOLDURAS, "Aplicar o tema às janelas e aos menus dos outros programas".into(), molduras::ligadas(), true),
                 (0, String::new(), false, true),
                 (MENU_ESCONDER, "Ocultar a barra de tarefas do Windows".into(), esconder, true),
                 (MENU_ALT_TAB, "Usar Alt+Tab para a visão geral".into(), alt_tab, true),
@@ -1691,7 +1691,7 @@ fn preview(saida: &str) -> Result<()> {
         selo: HICON::default(),
         progresso,
     };
-    let grupo = |n: &str, q: usize, ativo: bool| ItemGrupo { nome: n.into(), qtd: q, ativo };
+    let grupo = |n: &str, q: usize, ativo: bool| ItemGrupo { nome: n.into(), qtd: q, ativo, proprio: false };
     let cena = Cena {
         w,
         h,
@@ -1704,7 +1704,7 @@ fn preview(saida: &str) -> Result<()> {
             janela("Docs", false, true, false, None),
         ],
         hover: Some(Alvo::Grupo(4)),
-        hora: "terça-feira 20:25".into(),
+        hora: "Terça-feira 20:25".into(),
         bandeja: (0..4).map(|i| ItemBandeja { indice: i, icone, glifo: (i == 1).then_some(desenho::G_TECLADO) }).collect(),
     };
     unsafe {
