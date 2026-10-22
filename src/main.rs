@@ -148,7 +148,7 @@ fn atualizar(st: &mut Estado) {
     molduras::sincronizar(st.gfx.tema, &atuais, primeiro_plano(), st.icone_terminal.map(|(_, g, p)| (g, p)));
     // menus dos outros programas no modo claro ou escuro do tema, junto com as molduras
     if molduras::ligadas() {
-        menus_externos::ligar(st.gfx.tema.claro);
+        menus_externos::ligar(st.gfx.tema);
     } else {
         menus_externos::desligar();
     }
@@ -587,7 +587,7 @@ fn comecar_renomear(g: usize) {
         let fonte = CreateFontW(
             -(12.0 * s) as i32, 0, 0, 0, FW_BOLD.0 as i32, 0, 0, 0,
             DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, 0,
-            w!("JetBrainsMono Nerd Font"),
+            w!("JetBrainsMono NF"),
         );
         SendMessageW(e, WM_SETFONT, Some(WPARAM(fonte.0 as usize)), Some(LPARAM(1)));
         _ = SetWindowSubclass(e, Some(proc_edicao), 1, 0);
