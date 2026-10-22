@@ -196,7 +196,7 @@ fn cena(st: &mut Estado, w: i32, h: i32) -> Cena {
         grupos,
         janelas,
         hover: st.hover,
-        hora: format!("{} {:02}:{:02}", DIAS[t.wDayOfWeek as usize % 7], t.wHour, t.wMinute),
+        hora: format!("{}, {:02}:{:02}", DIAS[t.wDayOfWeek as usize % 7], t.wHour, t.wMinute),
         bandeja: bandeja::visiveis().into_iter().map(|(indice, icone, _, dono)| ItemBandeja { indice, icone, glifo: janelas::glifo(hwnd(dono)) }).collect(),
     }
 }
@@ -273,9 +273,9 @@ fn mostrar_dica(st: &mut Estado) {
             format!("{}, {} de {} de {}", DIAS[t.wDayOfWeek as usize % 7], t.wDay, MESES[(t.wMonth as usize + 11) % 12], t.wYear)
         }
         Some(Alvo::Grupo(i)) => st.grupos.lista.get(i).map(|g| match g.janelas.len() {
-            0 => format!("{}: vazio", g.nome),
-            1 => format!("{}: 1 janela", g.nome),
-            n => format!("{}: {n} janelas", g.nome),
+            0 => format!("Grupo {}: nenhuma janela", g.nome),
+            1 => format!("Grupo {}: 1 janela", g.nome),
+            n => format!("Grupo {}: {n} janelas", g.nome),
         }).unwrap_or_default(),
         _ => String::new(),
     };
@@ -668,10 +668,10 @@ fn menu_grupo(dono: HWND, i: usize, pt: POINT, acima: bool) {
         return;
     }
     let itens = vec![
-        (MENU_RENOMEAR, "Renomear".to_string(), false, true),
-        (MENU_NOVO_GRUPO, "Novo grupo".to_string(), false, true),
+        (MENU_RENOMEAR, "Renomear grupo".to_string(), false, true),
+        (MENU_NOVO_GRUPO, "Criar grupo".to_string(), false, true),
         (0, String::new(), false, true),
-        (MENU_APAGAR_GRUPO, format!("Apagar o grupo {} (as janelas vão para o anterior)", nomes[i]), false, nomes.len() > 1),
+        (MENU_APAGAR_GRUPO, format!("Excluir o grupo {} (as janelas passam para o grupo anterior)", nomes[i]), false, nomes.len() > 1),
     ];
     let Some(m) = montar_menu(&itens) else { return };
     match mostrar_menu(dono, m, pt, acima) {
@@ -716,9 +716,9 @@ fn clicar_direito(alvo: Option<Alvo>) {
                 .map(|(i, n)| (MENU_MOVER + i, format!("Grupo {n}"), false, true))
                 .collect();
             if let Some(sub) = montar_menu(&outros).filter(|_| !outros.is_empty()) {
-                _ = AppendMenuW(m, MF_POPUP, sub.0 as usize, w!("Mover para"));
+                _ = AppendMenuW(m, MF_POPUP, sub.0 as usize, w!("Mover para o grupo"));
             }
-            _ = AppendMenuW(m, MF_STRING, MENU_NOVO_GRUPO_COM, w!("Novo grupo com esta janela"));
+            _ = AppendMenuW(m, MF_STRING, MENU_NOVO_GRUPO_COM, w!("Criar grupo com esta janela"));
             _ = AppendMenuW(m, MF_SEPARATOR, 0, None);
             _ = AppendMenuW(m, MF_STRING, MENU_FECHAR, w!("Fechar janela"));
             match mostrar_menu(dono, m, pt, false) {
@@ -738,13 +738,13 @@ fn clicar_direito(alvo: Option<Alvo>) {
         _ => {
             let alt_tab = teclado::ALT_TAB.load(Ordering::Relaxed);
             let Some(m) = montar_menu(&[
-                (MENU_VISAO, "Visão geral (Win+Tab)".into(), false, true),
-                (MENU_MOLDURAS, "Molduras no tema".into(), molduras::ligadas(), true),
+                (MENU_VISAO, "Abrir a visão geral	Win+Tab".into(), false, true),
+                (MENU_MOLDURAS, "Aplicar o tema às bordas das janelas".into(), molduras::ligadas(), true),
                 (0, String::new(), false, true),
-                (MENU_ESCONDER, "Esconder a barra do Windows".into(), esconder, true),
-                (MENU_ALT_TAB, "Alt+Tab abre a visão geral".into(), alt_tab, true),
+                (MENU_ESCONDER, "Ocultar a barra de tarefas do Windows".into(), esconder, true),
+                (MENU_ALT_TAB, "Usar Alt+Tab para a visão geral".into(), alt_tab, true),
                 (MENU_INICIAR, "Iniciar com o Windows".into(), sistema::inicia_com_windows(), true),
-                (MENU_JUNTAR, "Juntar todas as janelas num grupo só".into(), false, true),
+                (MENU_JUNTAR, "Reunir todas as janelas em um único grupo".into(), false, true),
                 (0, String::new(), false, true),
                 (MENU_SAIR, "Sair".into(), false, true),
             ]) else {
@@ -752,7 +752,7 @@ fn clicar_direito(alvo: Option<Alvo>) {
             };
             // submenu com os temas do Omarchy, logo depois da visão geral
             let atual = com(|st| st.gfx.tema.nome).unwrap_or("");
-            let temas: Vec<Item> = tema::TEMAS.iter().enumerate().map(|(i, t)| (MENU_TEMA + i, t.nome.to_string(), t.nome == atual, true)).collect();
+            let temas: Vec<Item> = tema::TEMAS.iter().enumerate().map(|(i, t)| (MENU_TEMA + i, tema::nome_de_exibicao(t.nome), t.nome == atual, true)).collect();
             if let Some(sub) = montar_menu(&temas) {
                 unsafe { _ = InsertMenuW(m, 1, MF_BYPOSITION | MF_POPUP, sub.0 as usize, w!("Tema")) };
             }

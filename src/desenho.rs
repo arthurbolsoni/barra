@@ -460,11 +460,11 @@ impl Gfx {
         // topo: a janela escolhida e, embaixo, como usar ou o filtro
         self.texto(&c.titulo, &f_titulo, ret(40.0 * s, 12.0 * s, w - 40.0 * s, 38.0 * s), cor(t.texto_forte, 1.0))?;
         let (dica, tinta) = if c.filtro.is_empty() && c.lista {
-            ("tab próxima · shift+tab anterior · setas andam · solte o alt para abrir · esc cancela".to_string(), t.texto)
+            ("Tab: próxima janela  ·  Shift+Tab: janela anterior  ·  Setas: navegar  ·  Solte Alt para abrir  ·  Esc: cancelar".to_string(), t.texto)
         } else if c.filtro.is_empty() {
-            ("setas trocam de grupo · tab escolhe a janela · enter abre · 1–9 grupo · + novo · - apaga · shift+←/→ muda a janela de grupo · f2 renomeia · digite para filtrar · esc fecha".to_string(), t.texto)
+            ("Setas: selecionar grupo  ·  Tab: selecionar janela  ·  Enter: abrir  ·  1–9: ir para o grupo  ·  +: criar grupo  ·  −: excluir grupo  ·  Shift+←/→: mover janela  ·  F2: renomear  ·  Digite para filtrar  ·  Esc: fechar".to_string(), t.texto)
         } else {
-            (format!("filtro: {}", c.filtro), t.destaque)
+            (format!("Filtro: {}", c.filtro), t.destaque)
         };
         self.texto(&dica, &f_dica, ret(40.0 * s, 38.0 * s, w - 40.0 * s, 58.0 * s), cor(tinta, 1.0))?;
 
@@ -484,7 +484,7 @@ impl Gfx {
             if k.novo {
                 self.borda(k.r, cor(borda, 1.0), e)?;
                 let tinta = cor(if k.destino { t.amarelo } else { t.texto }, 1.0);
-                self.glifo(&format!("{G_MAIS}  novo grupo"), &f_novo, k.r, tinta)?;
+                self.glifo(&format!("{G_MAIS}  Criar grupo"), &f_novo, k.r, tinta)?;
                 continue;
             }
             self.preencher(k.area, cor(t.fundo_claro, 1.0))?;
@@ -492,7 +492,11 @@ impl Gfx {
             let pad = 12.0 * s;
             let nome = if k.ativo { t.destaque } else { t.texto };
             self.texto(&k.nome, &f_nome, ret(k.cab.left + pad, k.cab.top, k.cab.right - 110.0 * s, k.cab.bottom), cor(nome, 1.0))?;
-            let qtd = if k.qtd == 1 { "1 janela".to_string() } else { format!("{} janelas", k.qtd) };
+            let qtd = match k.qtd {
+                0 => "Nenhuma janela".to_string(),
+                1 => "1 janela".to_string(),
+                n => format!("{n} janelas"),
+            };
             self.texto(&qtd, &f_qtd, ret(k.cab.right - 140.0 * s, k.cab.top, k.cab.right - pad, k.cab.bottom), cor(t.texto, 1.0))?;
         }
 

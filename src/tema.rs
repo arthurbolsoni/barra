@@ -65,3 +65,14 @@ pub const TEMAS: &[Tema] = &[
 pub fn por_indice(i: u32) -> &'static Tema {
     TEMAS.get(i as usize).unwrap_or(&TEMAS[0])
 }
+
+/// Nome para o menu: "tokyo-night" vira "Tokyo Night".
+pub fn nome_de_exibicao(nome: &str) -> String {
+    nome.split('-')
+        .map(|p| {
+            let mut c = p.chars();
+            c.next().map(|i| i.to_uppercase().chain(c).collect::<String>()).unwrap_or_default()
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
