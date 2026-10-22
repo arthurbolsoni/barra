@@ -25,6 +25,20 @@ const G_WIFI: &str = "\u{f05a9}";
 const G_VOLUME: &str = "\u{f057e}";
 pub const G_TERMINAL: &str = "\u{f120}";
 pub const G_TECLADO: &str = "\u{f11c}";
+const G_MARCA: &str = "\u{f00c}";
+const G_SETA: &str = "\u{f105}";
+
+/// Item do menu de contexto, como o Windows pede para desenhar.
+pub struct ItemMenu<'a> {
+    pub texto: &'a str,
+    /// Tecla de atalho, alinhada à direita.
+    pub atalho: &'a str,
+    pub separador: bool,
+    pub submenu: bool,
+    pub marcado: bool,
+    pub habilitado: bool,
+    pub selecionado: bool,
+}
 
 /// O que fica embaixo do cursor.
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -274,8 +288,13 @@ impl Gfx {
     }
 
     fn no_dc<R>(&mut self, dc: HDC, w: i32, h: i32, f: impl FnOnce(&mut Self) -> Result<R>) -> Result<R> {
+        self.no_dc_em(dc, RECT { left: 0, top: 0, right: w, bottom: h }, f)
+    }
+
+    /// Desenha só no retângulo `r` do DC; dentro de `f` a origem é o canto de `r`.
+    fn no_dc_em<R>(&mut self, dc: HDC, r: RECT, f: impl FnOnce(&mut Self) -> Result<R>) -> Result<R> {
         unsafe {
-            self.rt.BindDC(dc, &RECT { left: 0, top: 0, right: w, bottom: h })?;
+            self.rt.BindDC(dc, &r)?;
             self.rt.BeginDraw();
         }
         let r = f(self);
@@ -439,6 +458,61 @@ impl Gfx {
             g.borda(ret(0.0, 0.0, w as f32, h as f32), cor(t.destaque, 1.0), 2.0 * s)?;
             let f = g.formato(12.0 * s, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_TEXT_ALIGNMENT_CENTER)?;
             g.texto(texto, &f, ret(8.0 * s, 0.0, w as f32 - 8.0 * s, h as f32), cor(t.texto, 1.0))
+        })
+    }
+
+    /// Tamanho (largura, altura) de um item do menu de contexto. O Windows ainda soma a
+    /// coluna da marca à largura; o desenho usa o retângulo que ele entregar.
+    pub fn medir_menu(&self, it: &ItemMenu, s: f32) -> (u32, u32) {
+        if it.separador {
+            return (1, (9.0 * s).round() as u32);
+        }
+        let Ok(f) = self.formato(12.0 * s, DWRITE_FONT_WEIGHT_BOLD, DWRITE_TEXT_ALIGNMENT_LEADING) else {
+            return ((200.0 * s) as u32, (26.0 * s) as u32);
+        };
+        let mut l = 28.0 * s + self.largura(it.texto, &f).unwrap_or(0.0) + 24.0 * s;
+        if !it.atalho.is_empty() {
+            l += 32.0 * s + self.largura(it.atalho, &f).unwrap_or(0.0);
+        }
+        (l.ceil() as u32, (26.0 * s).round() as u32)
+    }
+
+    /// Item do menu de contexto no tema: fundo `fundo`, selecionado em `selecao`, marca e
+    /// seta como glifos da Nerd Font, separador em linha `mudo`.
+    pub fn desenhar_menu(&mut self, dc: HDC, r: RECT, it: &ItemMenu, s: f32) -> Result<()> {
+        let (w, h) = ((r.right - r.left) as f32, (r.bottom - r.top) as f32);
+        self.no_dc_em(dc, r, |g| {
+            let t = g.tema;
+            let fundo = if it.selecionado && it.habilitado { t.selecao } else { t.fundo };
+            unsafe { g.rt.Clear(Some(&cor(fundo, 1.0))) };
+            if it.separador {
+                let y = (h / 2.0).floor();
+                return g.preencher(ret(10.0 * s, y, w - 10.0 * s, y + 1.0), cor(t.mudo, 1.0));
+            }
+            let apagado = cor(mistura(t.texto, t.fundo, 0.3), 1.0);
+            let tinta = if !it.habilitado {
+                cor(t.mudo, 1.0)
+            } else if it.selecionado {
+                cor(t.texto_forte, 1.0)
+            } else {
+                cor(t.texto, 1.0)
+            };
+            let peso = if it.marcado { DWRITE_FONT_WEIGHT_BOLD } else { DWRITE_FONT_WEIGHT_NORMAL };
+            let f = g.formato(12.0 * s, peso, DWRITE_TEXT_ALIGNMENT_LEADING)?;
+            let f_dir = g.formato(12.0 * s, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_TEXT_ALIGNMENT_TRAILING)?;
+            let f_glifo = g.formato(12.0 * s, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_TEXT_ALIGNMENT_CENTER)?;
+            if it.marcado {
+                g.glifo(G_MARCA, &f_glifo, ret(0.0, 0.0, 28.0 * s, h), cor(t.destaque, 1.0))?;
+            }
+            let fim = w - 24.0 * s;
+            g.texto(it.texto, &f, ret(28.0 * s, 0.0, fim, h), tinta)?;
+            if !it.atalho.is_empty() {
+                g.texto(it.atalho, &f_dir, ret(28.0 * s, 0.0, fim, h), if it.selecionado { cor(t.texto, 1.0) } else { apagado })?;
+            }
+            if it.submenu {
+                g.glifo(G_SETA, &f_glifo, ret(fim, 0.0, w - 4.0 * s, h), if it.selecionado { cor(t.texto_forte, 1.0) } else { apagado })?;
+            }
+            Ok(())
         })
     }
 

@@ -273,7 +273,19 @@ Texto de 12 px em `texto`, centralizado, itens no formato "Tecla: ação" separa
 Aplicada pelo DWM, sem injeção: modo escuro conforme o tema, barra de título `fundo`, texto `texto`, borda `destaque` na janela em primeiro plano e `mudo` nas outras, cantos retos. Terminais recebem como ícone da barra de título o glifo `>_` (`f120`) em negrito, na cor `texto`, gerado em 16 e 32 px. Tudo volta ao padrão do Windows ao desligar a opção ou sair.
 
 ### Menus
-Menus de contexto são os nativos do Win32, sem tema próprio. Textos no infinitivo ou imperativo formal: "Criar grupo", "Renomear grupo", "Mover para o grupo", "Fechar janela", "Aplicar o tema às bordas das janelas", "Sair".
+Menus de contexto do Win32 (teclado, submenus e posição do Windows), com os itens desenhados pela barra no tema.
+- **Janela:** cantos retos, sem sombra e sem animação de abertura; moldura de 3 px com borda de 2 px em `destaque` e o resto em `fundo`.
+- **Item:** 26 px de altura, texto de 12 px em `texto` a partir de 28 px da esquerda; selecionado com fundo `selecao` e texto `texto-forte`; desabilitado em `mudo`.
+- **Marcado:** glifo `f00c` em `destaque` na coluna de 28 px e texto em negrito.
+- **Atalho:** depois do texto, alinhado à direita, em `texto-apagado`.
+- **Submenu:** glifo `f105` em `texto-apagado` numa coluna de 24 px à direita.
+- **Separador:** linha de 1 px em `mudo`, recuada 10 px, em item de 9 px.
+- **Textos:** infinitivo ou imperativo formal: "Criar grupo", "Renomear grupo", "Mover para o grupo", "Fechar janela", "Aplicar o tema às bordas das janelas", "Sair".
+
+Menus de outros programas (bandeja, menu de sistema das janelas) continuam com o visual do Windows.
+
+### Caixa de renomear grupo
+Campo de texto do Win32 sobre o cabeçalho do cartão: JetBrainsMono Nerd Font 12 px em negrito, `texto-forte` sobre `fundo-claro`.
 
 ## Do's and Don'ts
 

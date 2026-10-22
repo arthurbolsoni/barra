@@ -23,6 +23,7 @@ use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::System::SystemInformation::GetLocalTime;
 use windows::Win32::System::Threading::CreateMutexW;
 use windows::Win32::UI::Accessibility::{SetWinEventHook, HWINEVENTHOOK};
+use windows::Win32::UI::Controls::{DRAWITEMSTRUCT, MEASUREITEMSTRUCT, ODS_CHECKED, ODS_DISABLED, ODS_GRAYED, ODS_SELECTED, ODT_MENU};
 use windows::Win32::UI::HiDpi::{GetDpiForWindow, SetProcessDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2};
 use windows::Win32::UI::Input::KeyboardAndMouse::*;
 use windows::Win32::UI::Shell::{DefSubclassProc, SetWindowSubclass};
@@ -575,10 +576,11 @@ fn comecar_renomear(g: usize) {
         ) else {
             return;
         };
+        // mesma letra do nome do grupo no cabeçalho do cartão
         let fonte = CreateFontW(
-            -(16.0 * s) as i32, 0, 0, 0, FW_SEMIBOLD.0 as i32, 0, 0, 0,
+            -(12.0 * s) as i32, 0, 0, 0, FW_BOLD.0 as i32, 0, 0, 0,
             DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, 0,
-            w!("Segoe UI Variable Text"),
+            w!("JetBrainsMono Nerd Font"),
         );
         SendMessageW(e, WM_SETFONT, Some(WPARAM(fonte.0 as usize)), Some(LPARAM(1)));
         _ = SetWindowSubclass(e, Some(proc_edicao), 1, 0);
@@ -614,41 +616,196 @@ unsafe extern "system" fn proc_edicao(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM,
 /// Item de menu: (id, texto, marcado, habilitado). id 0 = separador.
 type Item = (usize, String, bool, bool);
 
-fn montar_menu(itens: &[Item]) -> Option<HMENU> {
+/// Texto de um item do menu aberto. Os itens são desenhados pela barra (no tema) e só
+/// guardam o índice nesta lista.
+struct TextoMenu {
+    texto: String,
+    atalho: String,
+    separador: bool,
+    submenu: bool,
+}
+
+thread_local! {
+    static TEXTOS_MENU: RefCell<Vec<TextoMenu>> = const { RefCell::new(Vec::new()) };
+}
+
+/// Borda do menu aberto (COLORREF), para o gancho que pega a janela do menu.
+static BORDA_MENU: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+/// Fundo do menu aberto (COLORREF), para a moldura.
+static FUNDO_MENU: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+/// Põe um item desenhado pela barra na posição `pos` (None = no fim). id 0 = separador;
+/// `sub` faz do item a entrada de um submenu. O texto pode ter o atalho depois de um Tab.
+fn anexar(m: HMENU, pos: Option<u32>, id: usize, texto: &str, marcado: bool, habilitado: bool, sub: Option<HMENU>) {
+    let (texto, atalho) = texto.split_once('\t').unwrap_or((texto, ""));
+    let indice = TEXTOS_MENU.with_borrow_mut(|v| {
+        v.push(TextoMenu { texto: texto.into(), atalho: atalho.into(), separador: id == 0, submenu: sub.is_some() });
+        v.len() - 1
+    });
+    let mut tipo = MFT_OWNERDRAW;
+    if id == 0 {
+        tipo |= MFT_SEPARATOR;
+    }
+    let mut estado = MENU_ITEM_STATE(0);
+    if marcado {
+        estado |= MFS_CHECKED;
+    }
+    if !habilitado {
+        estado |= MFS_DISABLED;
+    }
+    let mii = MENUITEMINFOW {
+        cbSize: size_of::<MENUITEMINFOW>() as u32,
+        fMask: MIIM_FTYPE | MIIM_ID | MIIM_STATE | MIIM_DATA | MIIM_SUBMENU,
+        fType: tipo,
+        fState: estado,
+        wID: id as u32,
+        hSubMenu: sub.unwrap_or_default(),
+        dwItemData: indice,
+        ..Default::default()
+    };
     unsafe {
-        let m = CreatePopupMenu().ok()?;
-        for (id, texto, marcado, habilitado) in itens {
-            if *id == 0 {
-                _ = AppendMenuW(m, MF_SEPARATOR, 0, None);
-                continue;
-            }
-            let mut f = MF_STRING;
-            if *marcado {
-                f |= MF_CHECKED;
-            }
-            if !*habilitado {
-                f |= MF_GRAYED;
-            }
-            let t: Vec<u16> = texto.encode_utf16().chain([0]).collect();
-            _ = AppendMenuW(m, f, *id, PCWSTR(t.as_ptr()));
+        let pos = pos.unwrap_or(GetMenuItemCount(Some(m)).max(0) as u32);
+        _ = InsertMenuItemW(m, pos, true, &mii);
+    }
+}
+
+fn montar_menu(itens: &[Item]) -> Option<HMENU> {
+    let m = unsafe { CreatePopupMenu().ok()? };
+    for (id, texto, marcado, habilitado) in itens {
+        anexar(m, None, *id, texto, *marcado, *habilitado, None);
+    }
+    Some(m)
+}
+
+/// A janela do menu acabou de aparecer: cantos retos e borda de destaque, como a dica.
+unsafe extern "system" fn menu_aberto(_: HWINEVENTHOOK, _: u32, h: HWND, _: i32, _: i32, _: u32, _: u32) {
+    vestir_menu(h);
+}
+
+/// Cantos retos, sem sombra e moldura do tema na janela do menu. Chamado pelo evento de
+/// menu aberto e pelo WM_ENTERIDLE (o evento não chega para o primeiro menu); age uma vez
+/// por janela de menu e tema, já que o Windows reaproveita a janela.
+unsafe fn vestir_menu(h: HWND) {
+    use windows::Win32::Graphics::Dwm::*;
+    if h.is_invalid() || crate::janelas::classe(h) != "#32768" {
+        return;
+    }
+    // marca na janela a borda já aplicada: o tema pode ter mudado desde o último menu
+    let borda = BORDA_MENU.load(Ordering::Relaxed);
+    let marca = borda as usize + 1;
+    if GetPropW(h, w!("barra-menu")).0 as usize == marca {
+        return;
+    }
+    let primeira = GetPropW(h, w!("barra-menu")).0.is_null();
+    _ = SetPropW(h, w!("barra-menu"), Some(HANDLE(marca as *mut _)));
+    let canto = DWMWCP_DONOTROUND.0 as u32;
+    _ = DwmSetWindowAttribute(h, DWMWA_WINDOW_CORNER_PREFERENCE, &canto as *const _ as *const _, 4);
+    _ = DwmSetWindowAttribute(h, DWMWA_BORDER_COLOR, &borda as *const _ as *const _, 4);
+    // sem sombra: vale para os próximos menus da barra
+    let estilo = GetClassLongPtrW(h, GCL_STYLE);
+    if estilo & CS_DROPSHADOW.0 as usize != 0 {
+        SetClassLongPtrW(h, GCL_STYLE, (estilo & !(CS_DROPSHADOW.0 as usize)) as isize);
+    }
+    // a moldura cinza do Windows vira a borda de 2 px do tema
+    if primeira {
+        _ = SetWindowSubclass(h, Some(proc_moldura_menu), 2, 0);
+    }
+    // a janela do primeiro menu já está na tela: refaz a moldura e a borda do DWM
+    _ = SetWindowPos(h, None, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+    _ = RedrawWindow(Some(h), None, None, RDW_FRAME | RDW_INVALIDATE | RDW_UPDATENOW);
+}
+
+/// Moldura (área não cliente) da janela do menu: `fundo` com borda de 2 px em `destaque`.
+unsafe extern "system" fn proc_moldura_menu(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM, _: usize, _: usize) -> LRESULT {
+    match msg {
+        WM_NCPAINT => {
+            let dc = GetWindowDC(Some(h));
+            let mut j = RECT::default();
+            _ = GetWindowRect(h, &mut j);
+            let mut c = RECT::default();
+            _ = GetClientRect(h, &mut c);
+            let mut origem = POINT::default();
+            _ = ClientToScreen(h, &mut origem);
+            // cliente em coordenadas da janela, fora do recorte
+            let (cx, cy) = (origem.x - j.left, origem.y - j.top);
+            ExcludeClipRect(dc, cx, cy, cx + c.right, cy + c.bottom);
+            let todo = RECT { left: 0, top: 0, right: j.right - j.left, bottom: j.bottom - j.top };
+            let fundo = CreateSolidBrush(COLORREF(FUNDO_MENU.load(Ordering::Relaxed)));
+            let borda = CreateSolidBrush(COLORREF(BORDA_MENU.load(Ordering::Relaxed)));
+            FillRect(dc, &todo, borda);
+            let e = 2;
+            FillRect(dc, &RECT { left: e, top: e, right: todo.right - e, bottom: todo.bottom - e }, fundo);
+            _ = DeleteObject(fundo.into());
+            _ = DeleteObject(borda.into());
+            ReleaseDC(Some(h), dc);
+            LRESULT(0)
         }
-        Some(m)
+        WM_NCDESTROY => {
+            _ = RemovePropW(h, w!("barra-menu"));
+            DefSubclassProc(h, msg, wp, lp)
+        }
+        _ => DefSubclassProc(h, msg, wp, lp),
     }
 }
 
 /// Mostra o menu no ponto (embaixo: acima da barra) e devolve o id escolhido (0 = nada).
 fn mostrar_menu(dono: HWND, m: HMENU, pt: POINT, acima: bool) -> usize {
+    let (fundo, destaque) = com(|st| (st.gfx.tema.fundo, st.gfx.tema.destaque)).unwrap_or((0x1a1b26, 0x7aa2f7));
+    let colorref = |c: u32| (c & 0xFF) << 16 | (c & 0xFF00) | (c >> 16) & 0xFF;
+    BORDA_MENU.store(colorref(destaque), Ordering::Relaxed);
+    FUNDO_MENU.store(colorref(fundo), Ordering::Relaxed);
     unsafe {
+        // fundo do tema também nas margens do menu e dos submenus
+        let pincel = CreateSolidBrush(COLORREF(colorref(fundo)));
+        let info = MENUINFO { cbSize: size_of::<MENUINFO>() as u32, fMask: MIM_BACKGROUND | MIM_APPLYTOSUBMENUS, hbrBack: pincel, ..Default::default() };
+        _ = SetMenuInfo(m, &info);
+        let gancho = SetWinEventHook(EVENT_SYSTEM_MENUPOPUPSTART, EVENT_SYSTEM_MENUPOPUPSTART, None, Some(menu_aberto), windows::Win32::System::Threading::GetCurrentProcessId(), 0, WINEVENT_OUTOFCONTEXT);
         _ = SetForegroundWindow(dono); // sem isso o menu não fecha ao clicar fora
-        let mut f = TPM_RIGHTBUTTON | TPM_RETURNCMD | TPM_NONOTIFY;
+        // sem a animação de abertura: a janela do menu animada é em camadas e ignora a moldura
+        let mut f = TPM_RIGHTBUTTON | TPM_RETURNCMD | TPM_NOANIMATION;
         if acima {
             f |= TPM_BOTTOMALIGN;
         }
         let id = TrackPopupMenu(m, f, pt.x, pt.y, None, dono, None);
         _ = PostMessageW(Some(dono), WM_NULL, WPARAM(0), LPARAM(0));
+        _ = windows::Win32::UI::Accessibility::UnhookWinEvent(gancho);
         _ = DestroyMenu(m);
+        _ = DeleteObject(pincel.into());
+        TEXTOS_MENU.with_borrow_mut(|v| v.clear());
         id.0 as usize
     }
+}
+
+/// WM_MEASUREITEM de um item de menu da barra.
+fn medir_item_menu(mi: &mut MEASUREITEMSTRUCT) {
+    let (w, h) = TEXTOS_MENU.with_borrow(|v| {
+        let Some(t) = v.get(mi.itemData) else { return (0, 0) };
+        let it = desenho::ItemMenu { texto: &t.texto, atalho: &t.atalho, separador: t.separador, submenu: t.submenu, marcado: false, habilitado: true, selecionado: false };
+        com(|st| st.gfx.medir_menu(&it, st.escala)).unwrap_or((200, 26))
+    });
+    mi.itemWidth = w;
+    mi.itemHeight = h;
+}
+
+/// WM_DRAWITEM de um item de menu da barra.
+fn desenhar_item_menu(di: &DRAWITEMSTRUCT) {
+    TEXTOS_MENU.with_borrow(|v| {
+        let Some(t) = v.get(di.itemData) else { return };
+        let e = di.itemState.0;
+        let it = desenho::ItemMenu {
+            texto: &t.texto,
+            atalho: &t.atalho,
+            separador: t.separador,
+            submenu: t.submenu,
+            marcado: e & ODS_CHECKED.0 != 0,
+            habilitado: e & (ODS_DISABLED.0 | ODS_GRAYED.0) == 0,
+            selecionado: e & ODS_SELECTED.0 != 0,
+        };
+        _ = com(|st| st.gfx.desenhar_menu(di.hDC, di.rcItem, &it, st.escala));
+    });
+    // a seta de submenu do Windows é desenhada depois deste item: fica de fora
+    let r = di.rcItem;
+    unsafe { ExcludeClipRect(di.hDC, r.left, r.top, r.right, r.bottom) };
 }
 
 fn ponto_da_barra(barra: HWND) -> POINT {
@@ -670,6 +827,8 @@ const MENU_ALT_TAB: usize = 24;
 const MENU_VISAO: usize = 25;
 const MENU_MOLDURAS: usize = 26;
 const MENU_MOVER: usize = 100;
+/// Entrada de submenu (não é escolhida; só abre o submenu).
+const MENU_SUBMENU: usize = 1;
 
 fn menu_grupo(dono: HWND, i: usize, pt: POINT, acima: bool) {
     let Some(nomes) = com(|st| st.grupos.lista.iter().map(|g| g.nome.clone()).collect::<Vec<_>>()) else { return };
@@ -725,11 +884,11 @@ fn clicar_direito(alvo: Option<Alvo>) {
                 .map(|(i, n)| (MENU_MOVER + i, format!("Grupo {n}"), false, true))
                 .collect();
             if let Some(sub) = montar_menu(&outros).filter(|_| !outros.is_empty()) {
-                _ = AppendMenuW(m, MF_POPUP, sub.0 as usize, w!("Mover para o grupo"));
+                anexar(m, None, MENU_SUBMENU, "Mover para o grupo", false, true, Some(sub));
             }
-            _ = AppendMenuW(m, MF_STRING, MENU_NOVO_GRUPO_COM, w!("Criar grupo com esta janela"));
-            _ = AppendMenuW(m, MF_SEPARATOR, 0, None);
-            _ = AppendMenuW(m, MF_STRING, MENU_FECHAR, w!("Fechar janela"));
+            anexar(m, None, MENU_NOVO_GRUPO_COM, "Criar grupo com esta janela", false, true, None);
+            anexar(m, None, 0, "", false, true, None);
+            anexar(m, None, MENU_FECHAR, "Fechar janela", false, true, None);
             match mostrar_menu(dono, m, pt, false) {
                 MENU_FECHAR => _ = PostMessageW(Some(hwnd(h)), WM_CLOSE, WPARAM(0), LPARAM(0)),
                 MENU_NOVO_GRUPO_COM => _ = com(|st| {
@@ -763,7 +922,7 @@ fn clicar_direito(alvo: Option<Alvo>) {
             let atual = com(|st| st.gfx.tema.nome).unwrap_or("");
             let temas: Vec<Item> = tema::TEMAS.iter().enumerate().map(|(i, t)| (MENU_TEMA + i, tema::nome_de_exibicao(t.nome), t.nome == atual, true)).collect();
             if let Some(sub) = montar_menu(&temas) {
-                unsafe { _ = InsertMenuW(m, 1, MF_BYPOSITION | MF_POPUP, sub.0 as usize, w!("Tema")) };
+                anexar(m, Some(1), MENU_SUBMENU, "Tema", false, true, Some(sub));
             }
             match mostrar_menu(dono, m, pt, false) {
                 MENU_VISAO => abrir_visao(false, None),
@@ -834,6 +993,24 @@ unsafe extern "system" fn ao_primeiro_plano(_: HWINEVENTHOOK, _: u32, h: HWND, _
 }
 
 unsafe extern "system" fn proc_janela(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
+    // itens dos menus de contexto, desenhados no tema (o dono do menu recebe as mensagens)
+    if msg == WM_MEASUREITEM && wp.0 == 0 {
+        let mi = &mut *(lp.0 as *mut MEASUREITEMSTRUCT);
+        if mi.CtlType == ODT_MENU {
+            medir_item_menu(mi);
+            return LRESULT(1);
+        }
+    }
+    if msg == WM_ENTERIDLE && wp.0 == MSGF_MENU as usize {
+        vestir_menu(HWND(lp.0 as *mut _));
+    }
+    if msg == WM_DRAWITEM && wp.0 == 0 {
+        let di = &*(lp.0 as *const DRAWITEMSTRUCT);
+        if di.CtlType == ODT_MENU {
+            desenhar_item_menu(di);
+            return LRESULT(1);
+        }
+    }
     if h.0 as isize == BARRA.load(Ordering::Relaxed) {
         proc_barra(h, msg, wp, lp)
     } else if h.0 as isize == VISAO.load(Ordering::Relaxed) {
@@ -1337,13 +1514,28 @@ unsafe fn proc_visao(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
             LRESULT(0)
         }
         WM_CTLCOLOREDIT => {
+            // caixa de renomear no tema: `texto_forte` sobre `fundo_claro`
             let dc = HDC(wp.0 as *mut _);
-            SetTextColor(dc, COLORREF(0x00FFFFFF));
-            SetBkColor(dc, COLORREF(0x00302C2B));
+            let colorref = |c: u32| COLORREF((c & 0xFF) << 16 | (c & 0xFF00) | (c >> 16) & 0xFF);
+            let (fundo, texto) = com(|st| (st.gfx.tema.fundo_claro, st.gfx.tema.texto_forte)).unwrap_or((0x24283b, 0xc0caf5));
+            SetTextColor(dc, colorref(texto));
+            SetBkColor(dc, colorref(fundo));
             thread_local! {
-                static FUNDO: HBRUSH = unsafe { CreateSolidBrush(COLORREF(0x00302C2B)) };
+                static PINCEL: std::cell::Cell<(u32, HBRUSH)> = const { std::cell::Cell::new((u32::MAX, HBRUSH(std::ptr::null_mut()))) };
             }
-            LRESULT(FUNDO.with(|b| b.0 as isize))
+            let pincel = PINCEL.with(|p| {
+                let (c, b) = p.get();
+                if c == fundo {
+                    return b;
+                }
+                if !b.is_invalid() {
+                    _ = DeleteObject(b.into());
+                }
+                let novo = CreateSolidBrush(colorref(fundo));
+                p.set((fundo, novo));
+                novo
+            });
+            LRESULT(pincel.0 as isize)
         }
         WM_ACTIVATE => {
             // outra janela tomou o foco (clique em outro lugar, Win): fecha sem roubar de volta
