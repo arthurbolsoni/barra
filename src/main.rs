@@ -5,6 +5,7 @@ mod bandeja;
 mod desenho;
 mod grupos;
 mod janelas;
+mod molduras;
 mod sistema;
 mod tema;
 mod teclado;
@@ -130,6 +131,7 @@ fn atualizar(st: &mut Estado) {
     st.icones.retain(|h, _| atuais.contains(h));
     st.piscando.retain(|h| atuais.contains(h));
     st.mru.retain(|h| atuais.contains(h));
+    molduras::sincronizar(st.gfx.tema, &atuais, primeiro_plano());
     for h in atuais {
         if !st.mru.contains(&h) {
             st.mru.push(h);
@@ -627,6 +629,7 @@ const MENU_JUNTAR: usize = 22;
 const MENU_SAIR: usize = 23;
 const MENU_ALT_TAB: usize = 24;
 const MENU_VISAO: usize = 25;
+const MENU_MOLDURAS: usize = 26;
 const MENU_MOVER: usize = 100;
 
 fn menu_grupo(dono: HWND, i: usize, pt: POINT, acima: bool) {
@@ -706,6 +709,7 @@ fn clicar_direito(alvo: Option<Alvo>) {
             let alt_tab = teclado::ALT_TAB.load(Ordering::Relaxed);
             let Some(m) = montar_menu(&[
                 (MENU_VISAO, "Visão geral (Win+Tab)".into(), false, true),
+                (MENU_MOLDURAS, "Molduras no tema".into(), molduras::ligadas(), true),
                 (0, String::new(), false, true),
                 (MENU_ESCONDER, "Esconder a barra do Windows".into(), esconder, true),
                 (MENU_ALT_TAB, "Alt+Tab abre a visão geral".into(), alt_tab, true),
@@ -728,8 +732,14 @@ fn clicar_direito(alvo: Option<Alvo>) {
                     sistema::gravar(PREF_TEMA, Some((i - MENU_TEMA) as u32));
                     _ = com(|st| {
                         st.gfx.tema = tema::por_indice((i - MENU_TEMA) as u32);
-                        redesenhar(st);
+                        atualizar(st); // repinta as molduras no tema novo e redesenha
                     });
+                }
+                MENU_MOLDURAS => {
+                    let ligar = !molduras::ligadas();
+                    sistema::gravar(molduras::PREF, Some(ligar as u32));
+                    molduras::ligar(ligar);
+                    _ = com(atualizar);
                 }
                 MENU_ESCONDER => {
                     let ligar = !esconder;
@@ -767,6 +777,7 @@ fn limpar() {
     fechar_visao(false);
     grupos::trazer_todas_de_volta();
     bandeja::desligar();
+    molduras::restaurar();
     _ = com(|st| appbar::remover(st.barra));
     if sistema::barra_windows_escondida() {
         sistema::mostrar_barra_windows();
@@ -1332,6 +1343,7 @@ fn main() -> Result<()> {
         std::panic::set_hook(Box::new(|_| {
             grupos::trazer_todas_de_volta();
             sistema::mostrar_barra_windows();
+            molduras::restaurar();
         }));
 
         let instancia = GetModuleHandleW(PCWSTR::null())?;
@@ -1390,6 +1402,7 @@ fn main() -> Result<()> {
         }
         appbar::registrar(barra, WM_APPBAR);
         _ = com(posicionar);
+        _ = com(atualizar); // molduras das janelas abertas já no tema
         _ = ShowWindow(barra, SW_SHOWNOACTIVATE);
         if esconder {
             bandeja::ligar(barra);
