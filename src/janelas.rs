@@ -151,3 +151,9 @@ pub fn glifo(h: HWND) -> Option<&'static str> {
         _ => None,
     }
 }
+
+/// Janela de terminal (console clássico ou Windows Terminal): ganha o glifo `>_` do tema
+/// como ícone na barra de título.
+pub fn terminal(h: HWND) -> bool {
+    matches!(classe(h).as_str(), "ConsoleWindowClass" | "CASCADIA_HOSTING_WINDOW_CLASS")
+}

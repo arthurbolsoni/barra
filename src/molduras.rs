@@ -7,7 +7,8 @@ use std::collections::HashMap;
 use std::ffi::c_void;
 
 use windows::core::{w, PCWSTR};
-use windows::Win32::Foundation::HWND;
+use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
+use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::Win32::Graphics::Dwm::*;
 
 use crate::janelas::{existe, hwnd};
@@ -25,6 +26,8 @@ struct Aplicada {
     frente: bool,
     /// Modo escuro que a janela tinha antes, para devolver na saída.
     escuro_antes: u32,
+    /// Terminal: ícones (grande, pequeno) de antes de trocar pelo glifo do tema.
+    icone_antes: Option<(isize, isize)>,
 }
 
 struct Molduras {
@@ -59,12 +62,28 @@ fn pintar(h: HWND, tema: &Tema, frente: bool) {
     definir(h, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_DONOTROUND.0 as u32);
 }
 
+/// Troca o ícone da barra de título (WM_SETICON vale para janela de outro processo) e faz a
+/// janela redesenhar o título; sem o WM_THEMECHANGED o console não redesenha o ícone.
+/// Devolve os ícones de antes.
+fn trocar_icone(h: HWND, grande: isize, pequeno: isize) -> (isize, isize) {
+    unsafe {
+        let g = SendMessageW(h, WM_SETICON, Some(WPARAM(ICON_BIG as usize)), Some(LPARAM(grande))).0;
+        let p = SendMessageW(h, WM_SETICON, Some(WPARAM(ICON_SMALL as usize)), Some(LPARAM(pequeno))).0;
+        SendMessageW(h, WM_THEMECHANGED, None, None);
+        _ = SetWindowPos(h, None, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+        (g, p)
+    }
+}
+
 fn devolver(h: HWND, a: &Aplicada) {
     definir(h, DWMWA_CAPTION_COLOR, COR_PADRAO);
     definir(h, DWMWA_TEXT_COLOR, COR_PADRAO);
     definir(h, DWMWA_BORDER_COLOR, COR_PADRAO);
     definir(h, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_DEFAULT.0 as u32);
     definir(h, DWMWA_USE_IMMERSIVE_DARK_MODE, a.escuro_antes);
+    if let Some((g, p)) = a.icone_antes {
+        trocar_icone(h, g, p);
+    }
 }
 
 pub fn ligadas() -> bool {
@@ -81,7 +100,8 @@ pub fn ligar(sim: bool) {
 
 /// Pinta as janelas novas, troca a borda de quem ganhou ou perdeu o foco e repinta tudo
 /// quando o tema muda. Só chama o DWM no que mudou.
-pub fn sincronizar(tema: &'static Tema, atuais: &[isize], frente: isize) {
+/// `icones`: o glifo de terminal do tema, (grande, pequeno), para a barra de título dos terminais.
+pub fn sincronizar(tema: &'static Tema, atuais: &[isize], frente: isize, icones: Option<(HICON, HICON)>) {
     M.with_borrow_mut(|m| {
         if !m.ligadas {
             return;
@@ -91,11 +111,19 @@ pub fn sincronizar(tema: &'static Tema, atuais: &[isize], frente: isize) {
         m.janelas.retain(|&j, _| existe(j));
         for &j in atuais {
             let f = j == frente;
-            let a = m.janelas.entry(j).or_insert_with(|| Aplicada { tema: "", frente: !f, escuro_antes: ler_escuro(hwnd(j)) });
-            if a.tema != tema.nome || a.frente != f {
+            let a = m.janelas.entry(j).or_insert_with(|| Aplicada { tema: "", frente: !f, escuro_antes: ler_escuro(hwnd(j)), icone_antes: None });
+            let tema_mudou = a.tema != tema.nome;
+            if tema_mudou || a.frente != f {
                 pintar(hwnd(j), tema, f);
                 a.tema = tema.nome;
                 a.frente = f;
+            }
+            // terminal: ícone da barra de título vira o glifo do tema (troca de novo quando o tema muda)
+            if let Some((grande, pequeno)) = icones.filter(|_| crate::janelas::terminal(hwnd(j))) {
+                if tema_mudou || a.icone_antes.is_none() {
+                    let antes = trocar_icone(hwnd(j), grande.0 as isize, pequeno.0 as isize);
+                    a.icone_antes.get_or_insert(antes);
+                }
             }
         }
     });

@@ -87,6 +87,8 @@ struct Estado {
     icones: HashMap<isize, HICON>,
     /// Glifo no lugar do ícone, por janela (calculado uma vez).
     glifos: HashMap<isize, Option<&'static str>>,
+    /// Glifo de terminal do tema atual como ícone (nome do tema, grande, pequeno).
+    icone_terminal: Option<(&'static str, HICON, HICON)>,
     msg_shell: u32,
     msg_barra_criada: u32,
     esconder_windows: bool,
@@ -134,7 +136,14 @@ fn atualizar(st: &mut Estado) {
     st.glifos.retain(|h, _| atuais.contains(h));
     st.piscando.retain(|h| atuais.contains(h));
     st.mru.retain(|h| atuais.contains(h));
-    molduras::sincronizar(st.gfx.tema, &atuais, primeiro_plano());
+    // glifo de terminal do tema para a barra de título dos terminais; refeito quando o tema muda
+    // (os de temas anteriores não são destruídos: alguma janela pode ainda estar com eles)
+    if st.icone_terminal.map(|(n, _, _)| n) != Some(st.gfx.tema.nome) {
+        let cor = st.gfx.tema.texto;
+        let tam = (16.0 * st.escala).round() as i32;
+        st.icone_terminal = desenho::icone_de_glifo(desenho::G_TERMINAL, tam * 2, cor).zip(desenho::icone_de_glifo(desenho::G_TERMINAL, tam, cor)).map(|(g, p)| (st.gfx.tema.nome, g, p));
+    }
+    molduras::sincronizar(st.gfx.tema, &atuais, primeiro_plano(), st.icone_terminal.map(|(_, g, p)| (g, p)));
     for h in atuais {
         if !st.mru.contains(&h) {
             st.mru.push(h);
@@ -1423,6 +1432,7 @@ fn main() -> Result<()> {
                 piscando: HashSet::new(),
                 icones: HashMap::new(),
                 glifos: HashMap::new(),
+                icone_terminal: None,
                 msg_shell: RegisterWindowMessageW(w!("SHELLHOOK")),
                 msg_barra_criada: RegisterWindowMessageW(w!("TaskbarCreated")),
                 esconder_windows: esconder,
@@ -1472,7 +1482,7 @@ fn preview(saida: &str) -> Result<()> {
     let mut gfx = desenho::Gfx::new(&tema::TEMAS[tema_i])?;
     let icone = unsafe { LoadIconW(None, IDI_APPLICATION)? };
     let janela = |t: &str, ativa: bool, minimizada: bool, piscando: bool, progresso: Option<(u32, f32)>| ItemJanela {
-        glifo: t.starts_with("pwsh").then_some("{f120}"),
+        glifo: t.starts_with("pwsh").then_some(desenho::G_TERMINAL),
         hwnd: t.len() as isize,
         icone,
         ativa,
@@ -1495,7 +1505,7 @@ fn preview(saida: &str) -> Result<()> {
         ],
         hover: Some(Alvo::Grupo(4)),
         hora: "terça-feira 20:25".into(),
-        bandeja: (0..4).map(|i| ItemBandeja { indice: i, icone, glifo: (i == 1).then_some("{f11c}") }).collect(),
+        bandeja: (0..4).map(|i| ItemBandeja { indice: i, icone, glifo: (i == 1).then_some(desenho::G_TECLADO) }).collect(),
     };
     unsafe {
         let dc = CreateCompatibleDC(None);

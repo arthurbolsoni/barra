@@ -23,6 +23,8 @@ const FONTE: PCWSTR = w!("JetBrainsMono Nerd Font");
 const G_MAIS: &str = "\u{f067}";
 const G_WIFI: &str = "\u{f05a9}";
 const G_VOLUME: &str = "\u{f057e}";
+pub const G_TERMINAL: &str = "\u{f120}";
+pub const G_TECLADO: &str = "\u{f11c}";
 
 /// O que fica embaixo do cursor.
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -537,5 +539,79 @@ impl Gfx {
             self.borda(ret(j.r.left - m, j.r.top - m, j.r.right + m, j.r.bottom + m), tinta, m)?;
         }
         Ok(())
+    }
+}
+
+/// Ícone (HICON) com um glifo da Nerd Font na cor `cor` (0xRRGGBB), fundo transparente, para
+/// pôr na barra de título de outras janelas (WM_SETICON).
+pub fn icone_de_glifo(glifo: &str, tam: i32, cor_rgb: u32) -> Option<HICON> {
+    use windows::Win32::Graphics::Gdi::*;
+    use windows::Win32::UI::WindowsAndMessaging::{CreateIconIndirect, ICONINFO};
+    unsafe {
+        let d2d: ID2D1Factory = D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, None).ok()?;
+        let dw: IDWriteFactory = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED).ok()?;
+        let rt = d2d
+            .CreateDCRenderTarget(&D2D1_RENDER_TARGET_PROPERTIES {
+                r#type: D2D1_RENDER_TARGET_TYPE_DEFAULT,
+                pixelFormat: D2D1_PIXEL_FORMAT { format: DXGI_FORMAT_B8G8R8A8_UNORM, alphaMode: D2D1_ALPHA_MODE_PREMULTIPLIED },
+                dpiX: 96.0,
+                dpiY: 96.0,
+                ..Default::default()
+            })
+            .ok()?;
+        rt.SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE);
+        let dc = CreateCompatibleDC(None);
+        let bmi = BITMAPINFO {
+            bmiHeader: BITMAPINFOHEADER {
+                biSize: size_of::<BITMAPINFOHEADER>() as u32,
+                biWidth: tam,
+                biHeight: -tam,
+                biPlanes: 1,
+                biBitCount: 32,
+                biCompression: BI_RGB.0,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        let mut bits = std::ptr::null_mut();
+        let bmp = CreateDIBSection(Some(dc), &bmi, DIB_RGB_COLORS, &mut bits, None, 0).ok()?;
+        let antigo = SelectObject(dc, bmp.into());
+        let s = tam as f32;
+        let feito = (|| -> Result<()> {
+            rt.BindDC(dc, &RECT { left: 0, top: 0, right: tam, bottom: tam })?;
+            rt.BeginDraw();
+            rt.Clear(Some(&D2D1_COLOR_F { r: 0.0, g: 0.0, b: 0.0, a: 0.0 }));
+            // o glifo ocupa pouco do quadrado da fonte: tamanho maior e traço grosso para ler a 16 px
+            let f = dw.CreateTextFormat(FONTE, None, DWRITE_FONT_WEIGHT_BOLD, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, s * 1.15, w!("pt-br"))?;
+            f.SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER)?;
+            f.SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER)?;
+            let b = rt.CreateSolidColorBrush(&cor(cor_rgb, 1.0), None)?;
+            let u: Vec<u16> = glifo.encode_utf16().collect();
+            rt.DrawText(&u, &f, &ret(0.0, 0.0, s, s), &b, D2D1_DRAW_TEXT_OPTIONS_NONE, DWRITE_MEASURING_MODE_NATURAL);
+            rt.EndDraw(None, None)
+        })();
+        // pré-multiplicado -> alfa direto, que o CreateIconIndirect espera
+        let px = std::slice::from_raw_parts_mut(bits as *mut u32, (tam * tam) as usize);
+        let mut direto: Vec<u32> = px
+            .iter()
+            .map(|&p| {
+                let a = p >> 24;
+                if a == 0 {
+                    return 0;
+                }
+                let un = |c: u32| ((c * 255 + a / 2) / a).min(255);
+                (a << 24) | (un((p >> 16) & 0xFF) << 16) | (un((p >> 8) & 0xFF) << 8) | un(p & 0xFF)
+            })
+            .collect();
+        SelectObject(dc, antigo);
+        _ = DeleteObject(bmp.into());
+        _ = DeleteDC(dc);
+        feito.ok()?;
+        let cor_bmp = CreateBitmap(tam, tam, 1, 32, Some(direto.as_mut_ptr() as *const _));
+        let mascara = CreateBitmap(tam, tam, 1, 1, None);
+        let icone = CreateIconIndirect(&ICONINFO { fIcon: true.into(), hbmMask: mascara, hbmColor: cor_bmp, ..Default::default() }).ok();
+        _ = DeleteObject(cor_bmp.into());
+        _ = DeleteObject(mascara.into());
+        icone
     }
 }
