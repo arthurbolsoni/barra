@@ -12,6 +12,8 @@ use crate::janelas::{existe, hwnd};
 
 pub struct Grupo {
     pub nome: String,
+    /// Renomeado por quem usa; sem isso o nome é a posição (1, 2, 3…).
+    pub nome_proprio: bool,
     pub janelas: Vec<isize>,
     /// Última janela em foco no grupo, para voltar a ela.
     pub foco: isize,
@@ -19,14 +21,13 @@ pub struct Grupo {
 
 impl Grupo {
     fn novo(nome: String) -> Self {
-        Self { nome, janelas: Vec::new(), foco: 0 }
+        Self { nome, nome_proprio: false, janelas: Vec::new(), foco: 0 }
     }
 }
 
 pub struct Grupos {
     pub lista: Vec<Grupo>,
     pub ativo: usize,
-    contador: usize,
 }
 
 /// Janela estacionada e onde ela estava. Fora do estado da barra para o gancho de pânico
@@ -122,7 +123,7 @@ fn primeiro_plano() -> isize {
 
 impl Grupos {
     pub fn new() -> Self {
-        Self { lista: vec![Grupo::novo("1".into())], ativo: 0, contador: 1 }
+        Self { lista: vec![Grupo::novo("1".into())], ativo: 0 }
     }
 
     pub fn grupo_de(&self, h: isize) -> Option<usize> {
@@ -213,8 +214,8 @@ impl Grupos {
     }
 
     pub fn novo(&mut self) -> usize {
-        self.contador += 1;
-        self.lista.push(Grupo::novo(self.contador.to_string()));
+        self.lista.push(Grupo::novo(String::new()));
+        self.renumerar();
         self.lista.len() - 1
     }
 
@@ -231,6 +232,7 @@ impl Grupos {
             self.trocar(destino);
         }
         self.lista.remove(i);
+        self.renumerar();
         if self.ativo > i {
             self.ativo -= 1;
         }
@@ -247,6 +249,7 @@ impl Grupos {
         let mut g = self.lista.swap_remove(ativo);
         g.janelas = todas;
         self.lista = vec![g];
+        self.renumerar();
         self.ativo = 0;
     }
 }
@@ -254,4 +257,15 @@ impl Grupos {
 /// Onde a janela estava antes de ser estacionada.
 pub fn posicao_salva(h: isize) -> Option<RECT> {
     ESTACIONADAS.lock().unwrap().iter().find(|(e, _)| *e == h).map(|(_, r)| *r)
+}
+
+impl Grupos {
+    /// Grupos sem nome próprio levam o número da posição.
+    pub fn renumerar(&mut self) {
+        for (i, g) in self.lista.iter_mut().enumerate() {
+            if !g.nome_proprio {
+                g.nome = (i + 1).to_string();
+            }
+        }
+    }
 }

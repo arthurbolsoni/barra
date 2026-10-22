@@ -316,6 +316,7 @@ fn abrir_visao(modo_alt: bool, selecao: Option<isize>) {
         st.visao.aberta = true;
         st.visao.filtro.clear();
         st.visao.lista = modo_alt;
+        st.visao.cartao_sel = None;
         st.visao.arrasto = None;
         st.visao.selecao = selecao.or_else(|| st.mru.first().copied());
         let m = appbar::monitor();
@@ -329,11 +330,13 @@ fn abrir_visao(modo_alt: bool, selecao: Option<isize>) {
         return;
     };
     MODO_ALT.store(modo_alt, Ordering::Relaxed);
+    teclado::VISAO_ABERTA.store(true, Ordering::Relaxed);
     forcar_primeiro_plano(v);
 }
 
 /// Fecha a visão geral; `voltar` devolve o foco para a janela de antes.
 fn fechar_visao(voltar: bool) {
+    teclado::VISAO_ABERTA.store(false, Ordering::Relaxed);
     MODO_ALT.store(false, Ordering::Relaxed);
     let Some(Some(anterior)) = com(|st| {
         if !st.visao.aberta {
@@ -1191,7 +1194,8 @@ unsafe fn proc_visao(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
         }
         WM_KEYDOWN | WM_SYSKEYDOWN => {
             let vk = VIRTUAL_KEY(wp.0 as u16);
-            let shift = GetKeyState(VK_SHIFT.0 as i32) < 0;
+            // tecla pode ter vindo do gancho (sem foco): o estado do Shift vem do teclado físico
+            let shift = GetAsyncKeyState(VK_SHIFT.0 as i32) < 0;
             let lista = com(|st| st.visao.lista).unwrap_or(false);
             match vk {
                 VK_ESCAPE => fechar_visao(true),
@@ -1271,6 +1275,7 @@ unsafe fn proc_visao(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                     let nome = janelas::titulo(e).trim().to_string();
                     if !nome.is_empty() && g < st.grupos.lista.len() {
                         st.grupos.lista[g].nome = nome;
+                        st.grupos.lista[g].nome_proprio = true;
                     }
                 }
                 _ = DestroyWindow(e);
@@ -1348,6 +1353,7 @@ fn main() -> Result<()> {
         let visao_hwnd = criar(WS_EX_TOOLWINDOW | WS_EX_TOPMOST, w!("barra-visao"))?;
         BARRA.store(barra.0 as isize, Ordering::Relaxed);
         VISAO.store(visao_hwnd.0 as isize, Ordering::Relaxed);
+        teclado::VISAO.store(visao_hwnd.0 as isize, Ordering::Relaxed);
         DICA.store(dica.0 as isize, Ordering::Relaxed);
 
         let atuais = janelas::listar();

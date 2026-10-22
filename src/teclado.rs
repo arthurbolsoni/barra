@@ -23,6 +23,9 @@ pub static DESTINO: AtomicIsize = AtomicIsize::new(0);
 /// Visão geral aberta (ou para abrir) pelo Alt+Tab: soltar o Alt escolhe.
 pub static MODO_ALT: AtomicBool = AtomicBool::new(false);
 pub static ALT_TAB: AtomicBool = AtomicBool::new(true);
+/// Visão geral aberta: o gancho manda as teclas para ela mesmo sem o foco.
+pub static VISAO_ABERTA: AtomicBool = AtomicBool::new(false);
+pub static VISAO: AtomicIsize = AtomicIsize::new(0);
 /// Só para teste (BARRA_TESTE=1): aceita teclas simuladas por SendInput.
 static ACEITA_SIMULADA: AtomicBool = AtomicBool::new(false);
 
@@ -83,6 +86,12 @@ unsafe extern "system" fn gancho(code: i32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                         return LRESULT(1);
                     }
                 }
+            }
+            // visão geral aberta sem o foco (o Windows às vezes não deixa trocar): as teclas vão
+            // direto para ela, senão o Enter e os números cairiam na janela que estava na frente
+            let visao = HWND(VISAO.load(Ordering::Relaxed) as *mut _);
+            if VISAO_ABERTA.load(Ordering::Relaxed) && desce && GetForegroundWindow() != visao && encaminhar(visao, vk, k.scanCode) {
+                return LRESULT(1);
             }
             if MODO_ALT.load(Ordering::Relaxed) {
                 if matches!(vk, VK_MENU | VK_LMENU | VK_RMENU) && !desce {
@@ -168,4 +177,32 @@ pub fn forcar_primeiro_plano(h: HWND) {
             SendInput(&[alt(true)], size_of::<INPUT>() as i32);
         }
     }
+}
+
+/// Repassa uma tecla para a visão geral: teclas de comando como WM_KEYDOWN, o resto como o
+/// caractere que ela digita no layout atual (filtro, 1–9, +, -). Alt, Win, Ctrl e Shift
+/// sozinhos passam direto.
+unsafe fn encaminhar(visao: HWND, vk: VIRTUAL_KEY, scan: u32) -> bool {
+    if matches!(vk, VK_MENU | VK_LMENU | VK_RMENU | VK_LWIN | VK_RWIN | VK_CONTROL | VK_LCONTROL | VK_RCONTROL | VK_SHIFT | VK_LSHIFT | VK_RSHIFT | VK_TAB) {
+        return false;
+    }
+    if matches!(vk, VK_ESCAPE | VK_RETURN | VK_LEFT | VK_RIGHT | VK_UP | VK_DOWN | VK_BACK | VK_DELETE | VK_F2) {
+        _ = PostMessageW(Some(visao), WM_KEYDOWN, WPARAM(vk.0 as usize), LPARAM(0));
+        return true;
+    }
+    let mut estado = [0u8; 256];
+    if apertada(VK_SHIFT) {
+        estado[VK_SHIFT.0 as usize] = 0x80;
+    }
+    if GetKeyState(VK_CAPITAL.0 as i32) & 1 != 0 {
+        estado[VK_CAPITAL.0 as usize] = 0x01;
+    }
+    let layout = GetKeyboardLayout(GetWindowThreadProcessId(GetForegroundWindow(), None));
+    let mut buf = [0u16; 4];
+    let n = ToUnicodeEx(vk.0 as u32, scan, &estado, &mut buf, 4, Some(layout));
+    if n == 1 {
+        _ = PostMessageW(Some(visao), WM_CHAR, WPARAM(buf[0] as usize), LPARAM(0));
+        return true;
+    }
+    false
 }
