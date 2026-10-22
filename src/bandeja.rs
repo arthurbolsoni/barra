@@ -437,13 +437,14 @@ unsafe extern "system" fn proc_taskband(h: HWND, msg: u32, wp: WPARAM, lp: LPARA
 }
 
 /// Ícones visíveis, na ordem em que chegaram: (índice, ícone, dica).
-pub fn visiveis() -> Vec<(usize, HICON, String)> {
+/// (índice, ícone, dica, janela dona).
+pub fn visiveis() -> Vec<(usize, HICON, String, isize)> {
     BANDEJA.with_borrow(|b| {
         b.icones
             .iter()
             .enumerate()
             .filter(|(_, i)| !i.oculto && !i.icone.is_invalid())
-            .map(|(n, i)| (n, i.icone, i.dica.clone()))
+            .map(|(n, i)| (n, i.icone, i.dica.clone(), i.dono))
             .collect()
     })
 }

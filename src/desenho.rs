@@ -51,11 +51,14 @@ pub struct ItemJanela {
     pub selo: HICON,
     /// (estado TBPF, fração 0..1) quando o programa mostra progresso.
     pub progresso: Option<(u32, f32)>,
+    /// Glifo no lugar do ícone (terminal, Gerenciador de Tarefas…).
+    pub glifo: Option<&'static str>,
 }
 
 pub struct ItemBandeja {
     pub indice: usize,
     pub icone: HICON,
+    pub glifo: Option<&'static str>,
 }
 
 pub struct Cena {
@@ -298,6 +301,7 @@ impl Gfx {
         let f_texto = self.formato(12.0 * s, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_TEXT_ALIGNMENT_CENTER)?;
         let f_ativo = self.formato(12.0 * s, DWRITE_FONT_WEIGHT_BOLD, DWRITE_TEXT_ALIGNMENT_CENTER)?;
         let f_glifo = self.formato(14.0 * s, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_TEXT_ALIGNMENT_CENTER)?;
+        let f_glifo_janela = self.formato(16.0 * s, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_TEXT_ALIGNMENT_CENTER)?;
         let mut alvos: Alvos = Vec::new();
         let hover = |a: Alvo| c.hover == Some(a);
         let realce = cor(t.fundo_claro, 1.0);
@@ -347,7 +351,11 @@ impl Gfx {
             let cx = (r.left + r.right) / 2.0;
             let ri = ret(cx - lado / 2.0, meio - lado / 2.0, cx + lado / 2.0, meio + lado / 2.0);
             let apagado = if t.claro { 0.55 } else { 0.4 };
-            self.icone(j.icone, ri, if j.minimizada { apagado } else { 1.0 });
+            match j.glifo {
+                // glifo monocromático na cor do texto (minimizada, apagado)
+                Some(g) => self.glifo(g, &f_glifo_janela, r, cor(if j.minimizada { mistura(t.texto, t.fundo, 0.5) } else { t.texto }, 1.0))?,
+                None => self.icone(j.icone, ri, if j.minimizada { apagado } else { 1.0 }),
+            }
             if !j.selo.is_invalid() {
                 let l = 9.0 * s;
                 self.icone(j.selo, ret(ri.right - l * 0.6, ri.bottom - l * 0.7, ri.right + l * 0.4, ri.bottom + l * 0.3), 1.0);
@@ -392,7 +400,10 @@ impl Gfx {
             }
             let cx = (r.left + r.right) / 2.0;
             let l = 16.0 * s;
-            self.icone(ic.icone, ret(cx - l / 2.0, meio - l / 2.0, cx + l / 2.0, meio + l / 2.0), 1.0);
+            match ic.glifo {
+                Some(g) => self.glifo(g, &f_glifo, r, cor(t.texto, 1.0))?,
+                None => self.icone(ic.icone, ret(cx - l / 2.0, meio - l / 2.0, cx + l / 2.0, meio + l / 2.0), 1.0),
+            }
             alvos.push((r, Alvo::Bandeja(ic.indice)));
             xb = r.left;
         }

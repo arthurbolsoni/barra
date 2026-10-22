@@ -85,6 +85,8 @@ struct Estado {
     hover: Option<Alvo>,
     piscando: HashSet<isize>,
     icones: HashMap<isize, HICON>,
+    /// Glifo no lugar do ícone, por janela (calculado uma vez).
+    glifos: HashMap<isize, Option<&'static str>>,
     msg_shell: u32,
     msg_barra_criada: u32,
     esconder_windows: bool,
@@ -129,6 +131,7 @@ fn atualizar(st: &mut Estado) {
     let atuais = janelas::listar();
     st.grupos.sincronizar(&atuais);
     st.icones.retain(|h, _| atuais.contains(h));
+    st.glifos.retain(|h, _| atuais.contains(h));
     st.piscando.retain(|h| atuais.contains(h));
     st.mru.retain(|h| atuais.contains(h));
     molduras::sincronizar(st.gfx.tema, &atuais, primeiro_plano());
@@ -181,6 +184,7 @@ fn cena(st: &mut Estado, w: i32, h: i32) -> Cena {
                 piscando: st.piscando.contains(&j),
                 selo: p.selo,
                 progresso: (p.estado != 0).then_some((p.estado, p.fracao)),
+                glifo: *st.glifos.entry(j).or_insert_with(|| janelas::glifo(hwnd(j))),
             }
         })
         .collect();
@@ -193,7 +197,7 @@ fn cena(st: &mut Estado, w: i32, h: i32) -> Cena {
         janelas,
         hover: st.hover,
         hora: format!("{} {:02}:{:02}", DIAS[t.wDayOfWeek as usize % 7], t.wHour, t.wMinute),
-        bandeja: bandeja::visiveis().into_iter().map(|(indice, icone, _)| ItemBandeja { indice, icone }).collect(),
+        bandeja: bandeja::visiveis().into_iter().map(|(indice, icone, _, dono)| ItemBandeja { indice, icone, glifo: janelas::glifo(hwnd(dono)) }).collect(),
     }
 }
 
@@ -262,7 +266,7 @@ fn clicar(alvo: Alvo) {
 
 fn mostrar_dica(st: &mut Estado) {
     let texto = match st.hover {
-        Some(Alvo::Bandeja(i)) => bandeja::visiveis().into_iter().find(|(n, _, _)| *n == i).map(|(_, _, d)| d).unwrap_or_default(),
+        Some(Alvo::Bandeja(i)) => bandeja::visiveis().into_iter().find(|(n, _, _, _)| *n == i).map(|(_, _, d, _)| d).unwrap_or_default(),
         Some(Alvo::Janela(h)) => janelas::titulo(hwnd(h)),
         Some(Alvo::Relogio) => {
             let t = unsafe { GetLocalTime() };
@@ -1418,6 +1422,7 @@ fn main() -> Result<()> {
                 hover: None,
                 piscando: HashSet::new(),
                 icones: HashMap::new(),
+                glifos: HashMap::new(),
                 msg_shell: RegisterWindowMessageW(w!("SHELLHOOK")),
                 msg_barra_criada: RegisterWindowMessageW(w!("TaskbarCreated")),
                 esconder_windows: esconder,
@@ -1467,6 +1472,7 @@ fn preview(saida: &str) -> Result<()> {
     let mut gfx = desenho::Gfx::new(&tema::TEMAS[tema_i])?;
     let icone = unsafe { LoadIconW(None, IDI_APPLICATION)? };
     let janela = |t: &str, ativa: bool, minimizada: bool, piscando: bool, progresso: Option<(u32, f32)>| ItemJanela {
+        glifo: t.starts_with("pwsh").then_some("{f120}"),
         hwnd: t.len() as isize,
         icone,
         ativa,
@@ -1489,7 +1495,7 @@ fn preview(saida: &str) -> Result<()> {
         ],
         hover: Some(Alvo::Grupo(4)),
         hora: "terça-feira 20:25".into(),
-        bandeja: (0..4).map(|i| ItemBandeja { indice: i, icone }).collect(),
+        bandeja: (0..4).map(|i| ItemBandeja { indice: i, icone, glifo: (i == 1).then_some("{f11c}") }).collect(),
     };
     unsafe {
         let dc = CreateCompatibleDC(None);
