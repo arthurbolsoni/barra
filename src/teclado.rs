@@ -183,10 +183,10 @@ pub fn forcar_primeiro_plano(h: HWND) {
 /// caractere que ela digita no layout atual (filtro, 1–9, +, -). Alt, Win, Ctrl e Shift
 /// sozinhos passam direto.
 unsafe fn encaminhar(visao: HWND, vk: VIRTUAL_KEY, scan: u32) -> bool {
-    if matches!(vk, VK_MENU | VK_LMENU | VK_RMENU | VK_LWIN | VK_RWIN | VK_CONTROL | VK_LCONTROL | VK_RCONTROL | VK_SHIFT | VK_LSHIFT | VK_RSHIFT | VK_TAB) {
+    if matches!(vk, VK_MENU | VK_LMENU | VK_RMENU | VK_LWIN | VK_RWIN | VK_CONTROL | VK_LCONTROL | VK_RCONTROL | VK_SHIFT | VK_LSHIFT | VK_RSHIFT) {
         return false;
     }
-    if matches!(vk, VK_ESCAPE | VK_RETURN | VK_LEFT | VK_RIGHT | VK_UP | VK_DOWN | VK_BACK | VK_DELETE | VK_F2) {
+    if matches!(vk, VK_ESCAPE | VK_RETURN | VK_TAB | VK_LEFT | VK_RIGHT | VK_UP | VK_DOWN | VK_BACK | VK_DELETE | VK_F2) {
         _ = PostMessageW(Some(visao), WM_KEYDOWN, WPARAM(vk.0 as usize), LPARAM(0));
         return true;
     }

@@ -397,42 +397,68 @@ fn apagar_grupo_escolhido(st: &mut Estado) {
     }
 }
 
-/// Setas no Win+Tab: vai para o vizinho mais perto naquela direção, entre as janelas que
-/// casam com o filtro, os grupos vazios e o "novo grupo".
+/// Quadro (índice em `cartoes`) da seleção atual: o próprio quadro escolhido, ou o do grupo
+/// da janela escolhida.
+fn cartao_da_selecao(st: &Estado) -> Option<usize> {
+    let v = &st.visao;
+    v.cartao_sel.or_else(|| {
+        let g = v.selecao.and_then(|j| st.grupos.grupo_de(j))?;
+        v.cartoes.iter().position(|c| c.grupo == Some(g))
+    })
+}
+
+/// Setas no Win+Tab: pulam de grupo em grupo (um toque por grupo), para o quadro mais perto
+/// naquela direção, incluindo o "novo grupo".
 fn navegar(st: &mut Estado, dx: f32, dy: f32) {
     let v = &st.visao;
     let centro = |r: &windows::Win32::Graphics::Direct2D::Common::D2D_RECT_F| ((r.left + r.right) / 2.0, (r.top + r.bottom) / 2.0);
-    let mut pontos: Vec<((f32, f32), Option<isize>, Option<usize>)> =
-        v.itens.iter().filter(|i| v.casa(i.hwnd)).map(|i| (centro(&i.r), Some(i.hwnd), None)).collect();
-    for (ci, c) in v.cartoes.iter().enumerate() {
-        if c.grupo.is_none_or(|g| st.grupos.lista.get(g).is_some_and(|x| x.janelas.is_empty())) {
-            pontos.push((centro(&c.r), None, Some(ci)));
-        }
-    }
-    let atual = v
-        .selecao
-        .and_then(|s| v.itens.iter().find(|i| i.hwnd == s).map(|i| centro(&i.r)))
-        .or_else(|| v.cartao_sel.and_then(|c| v.cartoes.get(c)).map(|c| centro(&c.r)));
+    let atual = cartao_da_selecao(st);
     let escolha = match atual {
-        None => pontos.first().map(|p| (p.1, p.2)),
-        Some((ax, ay)) => pontos
-            .iter()
-            .filter_map(|&((px, py), j, c)| {
-                let principal = (px - ax) * dx + (py - ay) * dy;
-                if principal <= 1.0 {
-                    return None;
-                }
-                let lado = if dx != 0.0 { (py - ay).abs() } else { (px - ax).abs() };
-                Some((principal + 2.0 * lado, j, c))
-            })
-            .min_by(|a, b| a.0.total_cmp(&b.0))
-            .map(|p| (p.1, p.2)),
+        None => v.cartoes.iter().position(|c| c.grupo == Some(st.grupos.ativo)),
+        Some(a) => {
+            let (ax, ay) = centro(&v.cartoes[a].r);
+            v.cartoes
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| *i != a)
+                .filter_map(|(i, c)| {
+                    let (px, py) = centro(&c.r);
+                    let principal = (px - ax) * dx + (py - ay) * dy;
+                    if principal <= 1.0 {
+                        return None;
+                    }
+                    let lado = if dx != 0.0 { (py - ay).abs() } else { (px - ax).abs() };
+                    Some((principal + 2.0 * lado, i))
+                })
+                .min_by(|a, b| a.0.total_cmp(&b.0))
+                .map(|p| p.1)
+        }
     };
-    if let Some((j, c)) = escolha {
-        st.visao.selecao = j;
-        st.visao.cartao_sel = c;
+    if let Some(c) = escolha {
+        st.visao.cartao_sel = Some(c);
+        st.visao.selecao = None;
         invalidar(st.visao_hwnd);
     }
+}
+
+/// Tab no Win+Tab: escolhe a janela seguinte dentro do grupo selecionado.
+fn andar_no_grupo(st: &mut Estado, passo: i32) {
+    let Some(c) = cartao_da_selecao(st) else { return };
+    let Some(g) = st.visao.cartoes[c].grupo else { return };
+    let js: Vec<isize> = st.visao.ordem_espacial().into_iter().filter(|&j| st.grupos.grupo_de(j) == Some(g)).collect();
+    if js.is_empty() {
+        return;
+    }
+    let n = js.len() as i32;
+    let i = st.visao.selecao.and_then(|s| js.iter().position(|&j| j == s)).map(|i| i as i32);
+    let novo = match i {
+        Some(i) => (i + passo).rem_euclid(n),
+        None if passo > 0 => 0,
+        None => n - 1,
+    };
+    st.visao.selecao = Some(js[novo as usize]);
+    st.visao.cartao_sel = None;
+    invalidar(st.visao_hwnd);
 }
 
 /// Shift+setas: leva a janela escolhida para o grupo ao lado (depois do último, um novo).
@@ -1210,7 +1236,9 @@ unsafe fn proc_visao(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                 VK_RIGHT => _ = com(|st| navegar(st, 1.0, 0.0)),
                 VK_UP => _ = com(|st| navegar(st, 0.0, -1.0)),
                 VK_DOWN => _ = com(|st| navegar(st, 0.0, 1.0)),
-                VK_TAB => _ = com(|st| andar(st, false, if shift { -1 } else { 1 })),
+                VK_TAB if lista => _ = com(|st| andar(st, false, if shift { -1 } else { 1 })),
+                // Win+Tab: Tab escolhe a janela dentro do grupo selecionado
+                VK_TAB => _ = com(|st| andar_no_grupo(st, if shift { -1 } else { 1 })),
                 // Delete: apaga o grupo escolhido (as janelas dele vão para o grupo anterior)
                 VK_DELETE if !lista => _ = com(apagar_grupo_escolhido),
                 VK_F2 => {
