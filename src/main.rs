@@ -188,13 +188,14 @@ fn cena(st: &mut Estado, w: i32, h: i32) -> Cena {
         .enumerate()
         .map(|(i, g)| ItemGrupo { nome: g.nome.clone(), qtd: g.janelas.len(), ativo: i == ativo, proprio: g.nome_proprio })
         .collect();
-    let lista = st.grupos.lista[ativo].janelas.clone();
+    let lista: Vec<(usize, isize)> = st.grupos.lista.iter().enumerate().flat_map(|(g, gr)| gr.janelas.iter().map(move |&j| (g, j))).collect();
     let janelas = lista
         .into_iter()
-        .map(|j| {
+        .map(|(g, j)| {
             let p = bandeja::progresso(j);
             ItemJanela {
                 hwnd: j,
+                grupo: g,
                 icone: icone_de(st, j),
                 ativa: j == fg,
                 minimizada: unsafe { IsIconic(hwnd(j)).as_bool() },
@@ -248,8 +249,13 @@ fn ir_janela(h: isize) {
     }
 }
 
-/// Clique no botão da janela: traz para a frente, ou minimiza se já estava na frente.
+/// Clique no botão da janela: traz para a frente, ou minimiza se já estava na frente. Janela de
+/// outro grupo: troca para o grupo dela e põe ela em foco.
 fn clicar_janela(h: isize) {
+    if com(|st| st.grupos.grupo_de(h).is_some_and(|g| g != st.grupos.ativo)) == Some(true) {
+        ir_janela(h);
+        return;
+    }
     let j = hwnd(h);
     if primeiro_plano() == h && unsafe { !IsIconic(j).as_bool() } {
         unsafe { _ = ShowWindow(j, SW_MINIMIZE) };
@@ -1681,7 +1687,8 @@ fn preview(saida: &str) -> Result<()> {
     let tema_i = std::env::args().nth(3).and_then(|n| tema::TEMAS.iter().position(|t| t.nome == n)).unwrap_or(0);
     let mut gfx = desenho::Gfx::new(&tema::TEMAS[tema_i])?;
     let icone = unsafe { LoadIconW(None, IDI_APPLICATION)? };
-    let janela = |t: &str, ativa: bool, minimizada: bool, piscando: bool, progresso: Option<(u32, f32)>| ItemJanela {
+    let janela = |grupo: usize, t: &str, ativa: bool, minimizada: bool, piscando: bool, progresso: Option<(u32, f32)>| ItemJanela {
+        grupo,
         glifo: t.starts_with("pwsh").then_some(desenho::G_TERMINAL),
         hwnd: t.len() as isize,
         icone,
@@ -1698,10 +1705,13 @@ fn preview(saida: &str) -> Result<()> {
         escala: 1.0,
         grupos: vec![grupo("1", 3, false), grupo("2", 4, true), grupo("3", 6, false), grupo("4", 0, false), grupo("geral", 2, false)],
         janelas: vec![
-            janela("pwsh — projeto-a\\build", true, false, false, None),
-            janela("pwsh — testes", false, false, false, Some((2, 0.6))),
-            janela("GitHub — snap-zones e mais um título comprido", false, false, true, None),
-            janela("Docs", false, true, false, None),
+            janela(0, "Excel", false, false, false, None),
+            janela(1, "pwsh — projeto-a\\build", true, false, false, None),
+            janela(1, "pwsh — testes", false, false, false, Some((2, 0.6))),
+            janela(1, "GitHub — snap-zones e mais um título comprido", false, false, true, None),
+            janela(1, "Docs", false, true, false, None),
+            janela(2, "Outlook", false, false, false, None),
+            janela(2, "Teams", false, false, false, None),
         ],
         hover: Some(Alvo::Grupo(4)),
         hora: "Terça-feira 20:25".into(),

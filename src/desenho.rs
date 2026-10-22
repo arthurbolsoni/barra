@@ -63,6 +63,8 @@ pub struct ItemGrupo {
 
 pub struct ItemJanela {
     pub hwnd: isize,
+    /// Índice do grupo: as janelas vêm agrupadas, com um separador entre um grupo e outro.
+    pub grupo: usize,
     pub icone: HICON,
     pub ativa: bool,
     pub minimizada: bool,
@@ -360,11 +362,19 @@ impl Gfx {
         alvos.push((r, Alvo::NovoGrupo));
         x = r.right + 14.0 * s;
 
-        // janelas do grupo: só ícones; a com foco ganha a linha do destaque embaixo
+        // janelas de todos os grupos, em ordem, com "|" entre um grupo e outro; a com foco
+        // ganha a linha do destaque embaixo
         let lado = 16.0 * s;
         let celula = 28.0 * s;
         let meio = h / 2.0;
+        let mut anterior = None;
         for j in &c.janelas {
+            if anterior.is_some_and(|g| g != j.grupo) {
+                let sep = 12.0 * s;
+                self.texto("|", &f_texto, ret(x, 0.0, x + sep, h), cor(mistura(t.texto, t.fundo, 0.3), 1.0))?;
+                x += sep;
+            }
+            anterior = Some(j.grupo);
             let r = ret(x, 0.0, x + celula, h);
             if j.piscando {
                 self.preencher(r, cor(t.amarelo, 0.28))?;
