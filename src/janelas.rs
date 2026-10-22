@@ -146,7 +146,7 @@ pub fn glifo(h: HWND) -> Option<&'static str> {
     let exe = caminho.rsplit('\\').next()?.to_lowercase();
     match exe.as_str() {
         "taskmgr.exe" => Some("\u{f0e4}"),
-        "windowsterminal.exe" | "openconsole.exe" | "wt.exe" | "pwsh.exe" | "powershell.exe" | "cmd.exe" => Some("\u{f120}"),
+        "windowsterminal.exe" | "openconsole.exe" | "conhost.exe" | "wt.exe" | "pwsh.exe" | "powershell.exe" | "cmd.exe" => Some("\u{f120}"),
         "autohotkey.exe" | "autohotkey64.exe" | "autohotkey32.exe" | "autohotkeyux.exe" => Some("\u{f11c}"),
         _ => None,
     }
