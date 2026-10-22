@@ -16,27 +16,27 @@ colors:
   verde: "#9ece6a"
 typography:
   headline:
-    fontFamily: "JetBrainsMono Nerd Font"
+    fontFamily: "CaskaydiaMono Nerd Font"
     fontSize: "15px"
     fontWeight: 700
   title:
-    fontFamily: "JetBrainsMono Nerd Font"
+    fontFamily: "CaskaydiaMono Nerd Font"
     fontSize: "12px"
     fontWeight: 700
   body:
-    fontFamily: "JetBrainsMono Nerd Font"
+    fontFamily: "CaskaydiaMono Nerd Font"
     fontSize: "12px"
     fontWeight: 400
   label-cartao:
-    fontFamily: "JetBrainsMono Nerd Font"
+    fontFamily: "CaskaydiaMono Nerd Font"
     fontSize: "13px"
     fontWeight: 400
   glifo-sistema:
-    fontFamily: "JetBrainsMono Nerd Font"
+    fontFamily: "CaskaydiaMono Nerd Font"
     fontSize: "14px"
     fontWeight: 400
   glifo-janela:
-    fontFamily: "JetBrainsMono Nerd Font"
+    fontFamily: "CaskaydiaMono Nerd Font"
     fontSize: "16px"
     fontWeight: 400
 rounded:
@@ -126,7 +126,7 @@ components:
 
 **Creative North Star: "A Waybar transplantada"**
 
-A barra é a Waybar do Omarchy (Hyprland) levada para o Windows 11: uma faixa de 26 px no alto do monitor, informação como texto e glifos da JetBrainsMono Nerd Font, cores tiradas do tema Omarchy escolhido pelo usuário. Não há botão em forma de pílula, cantos arredondados, sombra, título de janela na barra nem botão Iniciar. A barra é quieta; a visão geral (Win+Tab e Alt+Tab) concentra a informação.
+A barra é a Waybar do Omarchy (Hyprland) levada para o Windows 11: uma faixa de 26 px no alto do monitor, informação como texto e glifos da CaskaydiaMono Nerd Font, cores tiradas do tema Omarchy escolhido pelo usuário. Não há botão em forma de pílula, cantos arredondados, sombra, título de janela na barra nem botão Iniciar. A barra é quieta; a visão geral (Win+Tab e Alt+Tab) concentra a informação.
 
 A densidade é de ferramenta de desenvolvedor: tudo em 12 px, peso como único eixo de hierarquia dentro da barra, estado marcado por cor do tema e por linhas de 2 px. A visão geral reproduz os quadros do Hyprland: cada grupo é um quadro de borda reta de 2 px com as miniaturas ao vivo do DWM no lugar onde as janelas ficam na tela, separado dos vizinhos por vãos de 10 px.
 
@@ -134,7 +134,7 @@ O mesmo vocabulário sai da barra e chega às janelas de outros programas: barra
 
 **Key Characteristics:**
 - Faixa de 26 px no topo, como AppBar; todas as medidas multiplicadas pela escala de DPI.
-- Uma única família tipográfica (JetBrainsMono Nerd Font) para texto e ícones de sistema.
+- Uma única família tipográfica (CaskaydiaMono Nerd Font) para texto e ícones de sistema.
 - Cores exclusivamente por papel de tema; 23 temas do Omarchy selecionáveis, padrão tokyo-night.
 - Zero arredondamento; bordas de 2 px no lugar de sombra.
 - Sem animação: os estados trocam na hora.
@@ -171,13 +171,13 @@ A paleta é um conjunto de papéis, não de valores: os hex abaixo são os do te
 
 ## Typography
 
-**Display Font:** JetBrainsMono Nerd Font
-**Body Font:** JetBrainsMono Nerd Font
-**Label/Mono Font:** JetBrainsMono Nerd Font (texto e glifos de ícone)
+**Display Font:** CaskaydiaMono Nerd Font
+**Body Font:** CaskaydiaMono Nerd Font
+**Label/Mono Font:** CaskaydiaMono Nerd Font (texto e glifos de ícone)
 
 **Character:** Monoespaçada de terminal, a mesma da Waybar do Omarchy. Hierarquia por peso, quase nunca por tamanho.
 
-DirectWrite com localidade `pt-br`, sem quebra de linha, corte por caractere com reticências ("…"), alinhamento vertical centralizado no retângulo. Texto e glifos usam antisserrilhado em escala de cinza, como no Omarchy (o ClearType deixa franja colorida); nos menus desenhados pelo GDI, a fonte é criada com `ANTIALIASED_QUALITY` e o nome de família "JetBrainsMono NF".
+DirectWrite com localidade `pt-br`, sem quebra de linha, corte por caractere com reticências ("…"), alinhamento vertical centralizado no retângulo. Texto e glifos usam antisserrilhado em escala de cinza, como no Omarchy (o ClearType deixa franja colorida); nos menus desenhados pelo GDI, a fonte é criada com `ANTIALIASED_QUALITY` e o nome de família "CaskaydiaMono NF".
 
 ### Hierarchy
 - **Headline** (negrito, 15 px): título da visão geral, a janela escolhida. Único texto acima de 12 px fora do cartão "Criar grupo".
@@ -188,7 +188,7 @@ DirectWrite com localidade `pt-br`, sem quebra de linha, corte por caractere com
 - **Glifo janela** (normal, 16 px): glifo que substitui o ícone do programa na barra, do mesmo tamanho do ícone.
 
 ### Named Rules
-**A Regra da Fonte Única.** Texto, número e ícone de sistema saem da JetBrainsMono Nerd Font. O negrito marca "ativo" nos cartões da visão geral e nos itens marcados dos menus; na barra não há negrito. O tamanho só sobe no título da visão geral.
+**A Regra da Fonte Única.** Texto, número e ícone de sistema saem da CaskaydiaMono Nerd Font. O negrito marca "ativo" nos cartões da visão geral e nos itens marcados dos menus; na barra não há negrito. O tamanho só sobe no título da visão geral.
 
 **A Regra do Glifo Monocromático.** Glifos da Nerd Font (`f067` mais, `f05a9` rede, `f057e` volume, `f120` terminal, `f11c` teclado, `f0e4` Gerenciador de Tarefas) são desenhados numa cor de papel do tema, nunca coloridos. Eles substituem o ícone colorido apenas do Gerenciador de Tarefas, dos terminais (Windows Terminal, conhost, OpenConsole, wt, pwsh, powershell, cmd) e do AutoHotkey; os outros programas mantêm o próprio ícone.
 
@@ -285,13 +285,13 @@ Menus de contexto do Win32 (teclado, submenus e posição do Windows), com os it
 Menus de outros programas (bandeja, clique direito, menu de sistema) e a barra de menus clássica ("Arquivo  Editar…") seguem as mesmas regras de item, cor e moldura. A barra instala ganchos globais e a `barra_menus.dll` faz o trabalho dentro de cada programa: modo claro ou escuro do uxtheme (`SetPreferredAppMode`), itens convertidos em desenho próprio só enquanto o menu está aberto, e a faixa da barra de menus pintada pelas mensagens `WM_UAHDRAWMENU`/`WM_UAHDRAWMENUITEM`. Menus que o próprio programa desenha (os do Explorer, por exemplo) ficam só no modo escuro; programas de 32 bits e os que rodam como administrador ficam de fora.
 
 ### Caixa de renomear grupo
-Campo de texto do Win32 sobre o cabeçalho do cartão: JetBrainsMono Nerd Font 12 px em negrito, `texto-forte` sobre `fundo-claro`.
+Campo de texto do Win32 sobre o cabeçalho do cartão: CaskaydiaMono Nerd Font 12 px em negrito, `texto-forte` sobre `fundo-claro`.
 
 ## Do's and Don'ts
 
 ### Do:
 - **Tire** toda cor de um papel do `Tema` ativo e confira a tela em pelo menos um tema claro (catppuccin-latte, flexoki-light, lupine, rose-pine, white).
-- **Use** JetBrainsMono Nerd Font em 12 px para texto novo, com negrito para "ativo" fora da barra; o único tamanho maior é o título de 15 px da visão geral.
+- **Use** CaskaydiaMono Nerd Font em 12 px para texto novo, com negrito para "ativo" fora da barra; o único tamanho maior é o título de 15 px da visão geral.
 - **Marque** foco e seleção com `destaque` em linha ou borda de 2 px.
 - **Use** `texto` misturado 30% com `fundo` para estado apagado.
 - **Multiplique** toda medida pela escala de DPI.

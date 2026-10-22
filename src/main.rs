@@ -587,7 +587,7 @@ fn comecar_renomear(g: usize) {
         let fonte = CreateFontW(
             -(12.0 * s) as i32, 0, 0, 0, FW_BOLD.0 as i32, 0, 0, 0,
             DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, ANTIALIASED_QUALITY, 0,
-            w!("JetBrainsMono NF"),
+            w!("CaskaydiaMono NF"),
         );
         SendMessageW(e, WM_SETFONT, Some(WPARAM(fonte.0 as usize)), Some(LPARAM(1)));
         _ = SetWindowSubclass(e, Some(proc_edicao), 1, 0);

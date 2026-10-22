@@ -33,7 +33,7 @@ Groups whose parked windows keep rendering, plus an overview (Alt+Tab / Win+Tab)
 
 ## Brand Commitments
 
-- Visual reference pinned by the user: Omarchy Linux (Hyprland + Waybar by DHH). Bar at the top, thin, JetBrainsMono Nerd Font, Omarchy theme colors.
+- Visual reference pinned by the user: Omarchy Linux (Hyprland + Waybar by DHH). Bar at the top, thin, CaskaydiaMono Nerd Font, Omarchy theme colors.
 - Every Omarchy theme must be selectable; the user picks.
 - Window buttons: icons only, no titles.
 - No Windows logo / Start button on the bar.

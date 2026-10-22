@@ -173,7 +173,7 @@ struct Fontes(Vec<((u32, bool), isize)>);
 
 static FONTES: Mutex<Fontes> = Mutex::new(Fontes(Vec::new()));
 
-/// JetBrainsMono Nerd Font em 12 px na escala do monitor.
+/// CaskaydiaMono Nerd Font em 12 px na escala do monitor.
 fn fonte(dpi: u32, negrito: bool) -> HFONT {
     let mut f = FONTES.lock().unwrap_or_else(|e| e.into_inner());
     if let Some(&(_, h)) = f.0.iter().find(|(k, _)| *k == (dpi, negrito)) {
@@ -184,7 +184,7 @@ fn fonte(dpi: u32, negrito: bool) -> HFONT {
             -(((12 * dpi + 48) / 96) as i32), 0, 0, 0,
             if negrito { FW_BOLD.0 as i32 } else { FW_NORMAL.0 as i32 },
             0, 0, 0, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, ANTIALIASED_QUALITY, 0,
-            w!("JetBrainsMono NF"),
+            w!("CaskaydiaMono NF"),
         )
     };
     f.0.push(((dpi, negrito), h.0 as isize));
@@ -684,7 +684,7 @@ struct UahDrawMenuItem {
 
 
 /// Item da barra de menus convertido em desenho próprio: assim o Windows pergunta a largura
-/// (WM_MEASUREITEM) e cada nome cabe na JetBrainsMono. Só ficam convertidos enquanto o tema
+/// (WM_MEASUREITEM) e cada nome cabe na CaskaydiaMono. Só ficam convertidos enquanto o tema
 /// está ligado.
 struct ItemBarra {
     pos: u32,

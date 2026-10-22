@@ -1,5 +1,5 @@
 //! Desenho da barra, da dica e da visão geral com Direct2D, num DC (o da janela ou um bitmap,
-//! no modo --preview). Visual do Omarchy: faixa fina em cima, texto e glifos em JetBrainsMono
+//! no modo --preview). Visual do Omarchy: faixa fina em cima, texto e glifos em CaskaydiaMono
 //! Nerd Font, cores do tema escolhido, cantos retos e bordas de 2 px como as do Hyprland.
 
 use std::collections::HashMap;
@@ -17,7 +17,7 @@ use windows::Win32::UI::WindowsAndMessaging::HICON;
 
 use crate::tema::Tema;
 
-const FONTE: PCWSTR = w!("JetBrainsMono Nerd Font");
+const FONTE: PCWSTR = w!("CaskaydiaMono Nerd Font");
 
 // glifos da Nerd Font
 const G_MAIS: &str = "\u{f067}";
