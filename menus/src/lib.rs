@@ -195,6 +195,8 @@ pub extern "system" fn gancho_retorno(code: i32, wp: WPARAM, lp: LPARAM) -> LRES
                 }
                 WM_SHOWWINDOW if ligado() && m.wParam.0 != 0 => vestir_moldura(m.hwnd, GetForegroundWindow() == m.hwnd),
                 WM_WINDOWPOSCHANGED if ligado() => vestir_botoes(m.hwnd),
+                // no WM_CREATE o pai já está ligado (no gancho CBT ainda não)
+                WM_CREATE if ligado() => controles::criada_com_pai(m.hwnd),
                 _ => {}
             }
         });

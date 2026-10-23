@@ -101,6 +101,44 @@ fn criar_tarefa() -> bool {
     ok
 }
 
+/// Interface XAML do Explorador do Windows 11 (abas, barra de comandos): anulada no HKCU, o
+/// Explorador volta ao layout com a faixa de opções, sem abas, todo em Win32 e DirectUI.
+const EXPLORADOR_XAML: [PCWSTR; 2] = [
+    w!("Software\\Classes\\CLSID\\{2aa9162e-c906-4dd9-ad0b-3d24a8eef5a0}"),
+    w!("Software\\Classes\\CLSID\\{6480100b-5a83-4d1e-9f69-8ae5a88e9a33}"),
+];
+
+/// Explorador clássico, sem abas (vale para as janelas abertas depois).
+pub fn explorador_classico() -> bool {
+    EXPLORADOR_XAML.iter().all(|c| unsafe {
+        let mut k = HKEY::default();
+        let ok = RegOpenKeyExW(HKEY_CURRENT_USER, *c, None, KEY_READ, &mut k).is_ok();
+        if ok {
+            _ = RegCloseKey(k);
+        }
+        ok
+    })
+}
+
+pub fn definir_explorador_classico(ligar: bool) {
+    for c in EXPLORADOR_XAML {
+        unsafe {
+            if ligar {
+                // InprocServer32 com o valor padrão vazio: a classe não carrega
+                let mut k = HKEY::default();
+                let sub = format!("{}\\InprocServer32\0", c.to_string().unwrap_or_default());
+                let sub: Vec<u16> = sub.encode_utf16().collect();
+                if RegCreateKeyExW(HKEY_CURRENT_USER, PCWSTR(sub.as_ptr()), None, None, REG_OPTION_NON_VOLATILE, KEY_SET_VALUE, None, &mut k, None).is_ok() {
+                    _ = RegSetValueExW(k, None, None, REG_SZ, Some(&[0, 0]));
+                    _ = RegCloseKey(k);
+                }
+            } else {
+                _ = RegDeleteTreeW(HKEY_CURRENT_USER, c);
+            }
+        }
+    }
+}
+
 pub fn inicia_com_windows() -> bool {
     tem_run() || tem_tarefa()
 }

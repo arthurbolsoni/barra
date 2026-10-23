@@ -26,7 +26,7 @@ use windows::Win32::Graphics::Gdi::*;
 use windows::Win32::System::LibraryLoader::*;
 use windows::Win32::System::Threading::GetCurrentThreadId;
 use windows::Win32::UI::Controls::{EnableThemeDialogTexture, IsThemeDialogTextureEnabled, DTBGOPTS, DTTOPTS, DTTOPTS_FLAGS, ETDT_DISABLE, ETDT_ENABLE, ETDT_USETABTEXTURE, HTHEME};
-use windows::Win32::UI::Shell::{DefSubclassProc, SetWindowSubclass};
+use windows::Win32::UI::Shell::{DefSubclassProc, RemoveWindowSubclass, SetWindowSubclass};
 use windows::Win32::UI::WindowsAndMessaging::*;
 
 use crate::{cor, escrever, fonte_de, ligado, modulo, prender, seguro, APAGADO, DESTAQUE, ESCURO, FUNDO, FUNDO_CLARO, MODO, MUDO, SELECAO, TEXTO, TEXTO_FORTE, VERMELHO};
@@ -49,10 +49,15 @@ static GET_THEME_COLOR: Original = AtomicUsize::new(0);
 static GET_THEME_SYS_COLOR: Original = AtomicUsize::new(0);
 static GET_THEME_SYS_COLOR_BRUSH: Original = AtomicUsize::new(0);
 static RECTANGLE: Original = AtomicUsize::new(0);
+static SET_BK_COLOR: Original = AtomicUsize::new(0);
 static DUI_COR: Original = AtomicUsize::new(0);
 static DUI_FUNDO: Original = AtomicUsize::new(0);
 static DUI_TEXTO: Original = AtomicUsize::new(0);
 static DUI_BORDA: Original = AtomicUsize::new(0);
+static FAIXA_LOAD_UI: Original = AtomicUsize::new(0);
+static FAIXA_DESTROY: Original = AtomicUsize::new(0);
+static FAIXA_INVALIDAR: Original = AtomicUsize::new(0);
+static FAIXA_DESCARREGAR: Original = AtomicUsize::new(0);
 
 type FGetSysColor = unsafe extern "system" fn(i32) -> u32;
 type FGetSysColorBrush = unsafe extern "system" fn(i32) -> HBRUSH;
@@ -125,6 +130,7 @@ fn instalar() {
         desviar(user32, PCSTR(c"DefWindowProcW".as_ptr() as _), def_window_proc_w as *const (), &DEF_WINDOW_PROC_W);
         desviar(user32, PCSTR(c"DefWindowProcA".as_ptr() as _), def_window_proc_a as *const (), &DEF_WINDOW_PROC_A);
         desviar(gdi32, PCSTR(c"Rectangle".as_ptr() as _), rectangle as *const (), &RECTANGLE);
+        desviar(gdi32, PCSTR(c"SetBkColor".as_ptr() as _), set_bk_color as *const (), &SET_BK_COLOR);
         desviar(ux, PCSTR(c"DrawThemeBackground".as_ptr() as _), draw_theme_background as *const (), &DRAW_THEME_BACKGROUND);
         desviar(ux, PCSTR(c"DrawThemeBackgroundEx".as_ptr() as _), draw_theme_background_ex as *const (), &DRAW_THEME_BACKGROUND_EX);
         desviar(ux, PCSTR(c"DrawThemeTextEx".as_ptr() as _), draw_theme_text_ex as *const (), &DRAW_THEME_TEXT_EX);
@@ -135,6 +141,7 @@ fn instalar() {
         INSTALADOS.store(true, Ordering::Release);
     });
     instalar_dui();
+    instalar_faixa();
 }
 
 /// Desvios no DirectUI (DUI70.dll), se ele já está no processo. Chamado também quando ele
@@ -166,7 +173,8 @@ fn cor_dui(c: u32) -> u32 {
         return c;
     }
     let papel = match c & 0x00FF_FFFF {
-        0x19_19_19 if c >> 24 == 0xFF => FUNDO,
+        0x19_19_19 | 0x1C_1C_1C | 0x20_20_20 if c >> 24 == 0xFF => FUNDO,
+        0x2B_2B_2B | 0x2C_2C_2C if c >> 24 == 0xFF => FUNDO_CLARO,
         0xFF_FF_FF => TEXTO,
         0xCD_CD_CD => APAGADO,
         0x86_3B_24 => DESTAQUE,
@@ -193,6 +201,205 @@ unsafe extern "system" fn dui_texto(e: *mut std::ffi::c_void, c: u32) -> HRESULT
 
 unsafe extern "system" fn dui_borda(e: *mut std::ffi::c_void, c: u32) -> HRESULT {
     original::<FCorElemento>(&DUI_BORDA)(e, cor_dui(c))
+}
+
+// ---------- faixa de opções (UIRibbon) ----------
+
+/// Faixa de opções do Explorador clássico (e de outros programas com o UIRibbon): as cores dela
+/// não passam pelo tema do Windows nem pelas cores do sistema. O framework aceita cores globais
+/// pelo IPropertyStore dele. Os métodos são desviados pela vtable de um framework criado numa
+/// linha STA (o objeto é de apartamento: fora dele viria um proxy). O programa costuma chamar o
+/// LoadUI antes de o desvio entrar; por isso as cores vão também na primeira invalidação de
+/// comando de cada framework, que o Explorador faz a cada seleção e navegação.
+pub(crate) fn instalar_faixa() {
+    static UMA_VEZ: Once = Once::new();
+    if excluido() || unsafe { GetModuleHandleW(w!("uiribbon.dll")) }.is_err() {
+        return;
+    }
+    UMA_VEZ.call_once(|| {
+        prender();
+        std::thread::spawn(|| seguro((), || unsafe {
+            use windows::Win32::System::Com::{CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED};
+            const CLSID_UIRIBBONFRAMEWORK: windows::core::GUID = windows::core::GUID::from_u128(0x926749fa_2615_4987_8845_c33e65f2b957);
+            let iniciou = CoInitializeEx(None, COINIT_APARTMENTTHREADED).is_ok();
+            if let Ok(f) = CoCreateInstance::<_, windows::core::IUnknown>(&CLSID_UIRIBBONFRAMEWORK, None, CLSCTX_INPROC_SERVER) {
+                // IUIFramework: 3 Initialize, 4 Destroy, 5 LoadUI, 9 InvalidateUICommand,
+                // 10 FlushPendingInvalidations
+                let vt = *(windows::core::Interface::as_raw(&f) as *const *const usize);
+                desviar_endereco(*vt.add(5), faixa_load_ui as *const (), &FAIXA_LOAD_UI);
+                desviar_endereco(*vt.add(4), faixa_destroy as *const (), &FAIXA_DESTROY);
+                desviar_endereco(*vt.add(9), faixa_invalidar as *const (), &FAIXA_INVALIDAR);
+                desviar_endereco(*vt.add(10), faixa_descarregar as *const (), &FAIXA_DESCARREGAR);
+            }
+            if iniciou {
+                CoUninitialize();
+            }
+        }));
+    });
+}
+
+unsafe fn desviar_endereco(alvo: usize, novo: *const (), o: &Original) {
+    let Ok(d) = RawDetour::new(alvo as *const (), novo) else { return };
+    o.store(d.trampoline() as *const () as usize, Ordering::Release);
+    if d.enable().is_err() {
+        o.store(0, Ordering::Release);
+        return;
+    }
+    std::mem::forget(d);
+}
+
+unsafe extern "system" fn faixa_load_ui(f: *mut std::ffi::c_void, inst: HINSTANCE, nome: PCWSTR) -> HRESULT {
+    let hr = original::<unsafe extern "system" fn(*mut std::ffi::c_void, HINSTANCE, PCWSTR) -> HRESULT>(&FAIXA_LOAD_UI)(f, inst, nome);
+    if hr.is_ok() {
+        seguro((), || conferir_faixa(f));
+    }
+    hr
+}
+
+unsafe extern "system" fn faixa_destroy(f: *mut std::ffi::c_void) -> HRESULT {
+    if let Ok(mut v) = FAIXAS.lock() {
+        v.retain(|x| x.framework != f as usize);
+    }
+    original::<unsafe extern "system" fn(*mut std::ffi::c_void) -> HRESULT>(&FAIXA_DESTROY)(f)
+}
+
+unsafe extern "system" fn faixa_invalidar(f: *mut std::ffi::c_void, comando: u32, flags: i32, chave: *const PROPERTYKEY) -> HRESULT {
+    let hr = original::<unsafe extern "system" fn(*mut std::ffi::c_void, u32, i32, *const PROPERTYKEY) -> HRESULT>(&FAIXA_INVALIDAR)(f, comando, flags, chave);
+    seguro((), || conferir_faixa(f));
+    hr
+}
+
+unsafe extern "system" fn faixa_descarregar(f: *mut std::ffi::c_void) -> HRESULT {
+    let hr = original::<unsafe extern "system" fn(*mut std::ffi::c_void) -> HRESULT>(&FAIXA_DESCARREGAR)(f);
+    seguro((), || conferir_faixa(f));
+    hr
+}
+
+/// Framework com as cores do tema: a versão do tema aplicada e os valores de antes.
+struct Faixa {
+    framework: usize,
+    versao: u32,
+    antes: [[u64; 3]; 3],
+}
+
+static FAIXAS: std::sync::Mutex<Vec<Faixa>> = std::sync::Mutex::new(Vec::new());
+
+thread_local! {
+    /// Gravando as cores: o SetValue pode invalidar comandos e voltar aqui.
+    static NA_FAIXA: Cell<bool> = const { Cell::new(false) };
+}
+
+/// Põe as cores do tema no framework (ou as devolve, com o tema desligado). O Explorador grava
+/// as cores do modo escuro depois do LoadUI, por cima das do tema: a cada chamada, se o fundo
+/// não é o do tema, grava de novo, e o que estava lá passa a ser o valor de antes.
+unsafe fn conferir_faixa(f: *mut std::ffi::c_void) {
+    if NA_FAIXA.replace(true) {
+        return;
+    }
+    let versao = crate::VERSAO.load(Ordering::Relaxed);
+    let Ok(mut v) = FAIXAS.lock() else {
+        NA_FAIXA.set(false);
+        return;
+    };
+    let i = v.iter().position(|x| x.framework == f as usize);
+    match (i, ligado()) {
+        (Some(i), true) if v[i].versao != versao || fundo_da_faixa(f) != Some(hsb(crate::CORES[FUNDO].load(Ordering::Relaxed)) as u64) => {
+            let mudou = v[i].versao == versao;
+            if let Some(antes) = cores_da_faixa(f, None) {
+                // trocadas pelo programa: as dele são as de antes
+                if mudou {
+                    v[i].antes = antes;
+                }
+            }
+            v[i].versao = versao;
+        }
+        (Some(i), false) => {
+            cores_da_faixa(f, Some(&v[i].antes));
+            v.remove(i);
+        }
+        (None, true) => {
+            if let Some(antes) = cores_da_faixa(f, None) {
+                v.push(Faixa { framework: f as usize, versao, antes });
+            }
+        }
+        _ => {}
+    }
+    drop(v);
+    NA_FAIXA.set(false);
+}
+
+/// UI_HSBCOLOR de uma cor 0xRRGGBB: matiz e saturação do HSL em 0–255; o brilho sai da
+/// luminosidade pela reta dos valores que o próprio Explorador usa no modo escuro (fundo
+/// #202020 com brilho 15, texto branco com 250).
+fn hsb(c: u32) -> u32 {
+    let (r, g, b) = (((c >> 16) & 0xFF) as f32 / 255.0, ((c >> 8) & 0xFF) as f32 / 255.0, (c & 0xFF) as f32 / 255.0);
+    let (max, min) = (r.max(g).max(b), r.min(g).min(b));
+    let l = (max + min) / 2.0;
+    let d = max - min;
+    let s = if d == 0.0 { 0.0 } else { d / (1.0 - (2.0 * l - 1.0).abs()) };
+    let h = if d == 0.0 {
+        0.0
+    } else if max == r {
+        ((g - b) / d).rem_euclid(6.0)
+    } else if max == g {
+        (b - r) / d + 2.0
+    } else {
+        (r - g) / d + 4.0
+    } / 6.0;
+    let brilho = ((15.0 + (l - 32.0 / 255.0) * (235.0 / (1.0 - 32.0 / 255.0))) / 255.0).clamp(0.0, 1.0);
+    let byte = |v: f32| (v * 255.0).round() as u32;
+    byte(h) | byte(s) << 8 | byte(brilho) << 16
+}
+
+const IID_IPROPERTYSTORE: windows::core::GUID = windows::core::GUID::from_u128(0x886d8eeb_8cf2_4446_8d02_cdba1dbdcf99);
+
+/// UI_PKEY_Global* (VT_UI4 = 19, VT_BOOL = 11).
+fn chave_da_faixa(i: u32, tipo: u32) -> PROPERTYKEY {
+    PROPERTYKEY { fmtid: windows::core::GUID::from_values(i, 0x7363, 0x696e, [0x84, 0x41, 0x79, 0x8a, 0xcf, 0x5a, 0xeb, 0xb7]), pid: tipo }
+}
+
+/// UI_PKEY_GlobalBackgroundColor atual do framework.
+unsafe fn fundo_da_faixa(f: *mut std::ffi::c_void) -> Option<u64> {
+    let vt = |o: *mut std::ffi::c_void, i: usize| *(*(o as *const *const usize)).add(i);
+    let consultar: unsafe extern "system" fn(*mut std::ffi::c_void, *const windows::core::GUID, *mut *mut std::ffi::c_void) -> HRESULT = std::mem::transmute(vt(f, 0));
+    let mut loja = std::ptr::null_mut();
+    if consultar(f, &IID_IPROPERTYSTORE, &mut loja).is_err() || loja.is_null() {
+        return None;
+    }
+    let ler: unsafe extern "system" fn(*mut std::ffi::c_void, *const PROPERTYKEY, *mut [u64; 3]) -> HRESULT = std::mem::transmute(vt(loja, 5));
+    let mut v = [0u64; 3];
+    let ok = ler(loja, &chave_da_faixa(2000, 19), &mut v).is_ok();
+    let liberar: unsafe extern "system" fn(*mut std::ffi::c_void) -> u32 = std::mem::transmute(vt(loja, 2));
+    liberar(loja);
+    ok.then_some(v[1] & 0xFFFF_FFFF)
+}
+
+/// Cores globais da faixa: fundo, destaque e texto do tema, ou `devolver` (os valores de antes).
+/// Devolve os valores que estavam lá.
+unsafe fn cores_da_faixa(f: *mut std::ffi::c_void, devolver: Option<&[[u64; 3]; 3]>) -> Option<[[u64; 3]; 3]> {
+    let vt = |o: *mut std::ffi::c_void, i: usize| *(*(o as *const *const usize)).add(i);
+    let consultar: unsafe extern "system" fn(*mut std::ffi::c_void, *const windows::core::GUID, *mut *mut std::ffi::c_void) -> HRESULT = std::mem::transmute(vt(f, 0));
+    let mut loja = std::ptr::null_mut();
+    if consultar(f, &IID_IPROPERTYSTORE, &mut loja).is_err() || loja.is_null() {
+        return None;
+    }
+    // IPropertyStore: 5 GetValue, 6 SetValue, 7 Commit; chaves UI_PKEY_Global*Color (VT_UI4)
+    let ler: unsafe extern "system" fn(*mut std::ffi::c_void, *const PROPERTYKEY, *mut [u64; 3]) -> HRESULT = std::mem::transmute(vt(loja, 5));
+    let gravar: unsafe extern "system" fn(*mut std::ffi::c_void, *const PROPERTYKEY, *const [u64; 3]) -> HRESULT = std::mem::transmute(vt(loja, 6));
+    let confirmar: unsafe extern "system" fn(*mut std::ffi::c_void) -> HRESULT = std::mem::transmute(vt(loja, 7));
+    let rgb = |p: usize| crate::CORES[p].load(Ordering::Relaxed);
+    let mut antes = [[0u64; 3]; 3];
+    let valores = [(2000, 19u64, hsb(rgb(FUNDO)) as u64), (2001, 19, hsb(rgb(DESTAQUE)) as u64), (2002, 19, hsb(rgb(TEXTO)) as u64)];
+    for (k, (i, tipo, v)) in valores.into_iter().enumerate() {
+        let chave = |i: u32| chave_da_faixa(i, tipo as u32);
+        _ = ler(loja, &chave(i), &mut antes[k]);
+        let valor = devolver.map_or([tipo, v, 0], |d| d[k]);
+        _ = gravar(loja, &chave(i), &valor);
+    }
+    _ = confirmar(loja);
+    let liberar: unsafe extern "system" fn(*mut std::ffi::c_void) -> u32 = std::mem::transmute(vt(loja, 2));
+    liberar(loja);
+    Some(antes)
 }
 
 // ---------- cores do sistema ----------
@@ -307,11 +514,45 @@ unsafe extern "system" fn get_sys_color_brush(i: i32) -> HBRUSH {
 unsafe extern "system" fn fill_rect(dc: HDC, r: *const RECT, b: HBRUSH) -> i32 {
     let o = original::<FFillRect>(&FILL_RECT);
     if ligado() {
-        if let Some(p) = indice_do_pincel(b).and_then(papel_da_cor) {
+        if let Some(p) = indice_do_pincel(b).and_then(papel_da_cor).or_else(|| seguro(None, || papel_do_pincel_cinza(b))) {
             return o(dc, r, pincel(p));
         }
     }
     o(dc, r, b)
+}
+
+/// Cinzas que os programas usam no modo escuro do Windows, com pincel e cor próprios (o
+/// Explorador pinta o painel da esquerda, a barra de endereço e a barra de status assim): o
+/// papel do tema de cada um. Só no modo escuro.
+fn papel_do_cinza(c: u32) -> Option<usize> {
+    if crate::MODO.load(Ordering::Relaxed) != crate::ESCURO {
+        return None;
+    }
+    match c & 0x00FF_FFFF {
+        0x19_19_19 | 0x1C_1C_1C | 0x20_20_20 => Some(FUNDO),
+        0x2B_2B_2B | 0x2C_2C_2C => Some(FUNDO_CLARO),
+        _ => None,
+    }
+}
+
+/// Pincel sólido de um desses cinzas.
+unsafe fn papel_do_pincel_cinza(b: HBRUSH) -> Option<usize> {
+    if (b.0 as isize) <= N_CORES as isize {
+        return None;
+    }
+    let mut lb = LOGBRUSH::default();
+    if GetObjectW(HGDIOBJ(b.0), size_of::<LOGBRUSH>() as i32, Some(&mut lb as *mut _ as *mut _)) == 0 || lb.lbStyle != BS_SOLID {
+        return None;
+    }
+    papel_do_cinza(lb.lbColor.0)
+}
+
+type FSetBkColor = unsafe extern "system" fn(HDC, COLORREF) -> COLORREF;
+
+/// Fundo de texto opaco (árvore, listas) num desses cinzas: a cor do tema.
+unsafe extern "system" fn set_bk_color(dc: HDC, c: COLORREF) -> COLORREF {
+    let c = if ligado() { papel_do_cinza(c.0).map_or(c, cor) } else { c };
+    original::<FSetBkColor>(&SET_BK_COLOR)(dc, c)
 }
 
 /// FillRect sem o desvio.
@@ -508,6 +749,44 @@ pub fn criada(h: HWND) {
     }
 }
 
+/// Janela criada, já com o pai: as barras de ferramentas do caminho do Explorador (pai
+/// "Breadcrumb Parent") ganham a marca de pintura.
+pub fn criada_com_pai(h: HWND) {
+    if excluido() || !INSTALADOS.load(Ordering::Acquire) {
+        return;
+    }
+    unsafe {
+        if classe_da_janela(h, "ToolbarWindow32") && GetParent(h).is_ok_and(|p| classe_da_janela(p, "Breadcrumb Parent")) {
+            _ = SetWindowSubclass(h, Some(proc_caminho), ID_CAMINHO, 0);
+        }
+    }
+}
+
+const ID_CAMINHO: usize = 0x6261_7263; // "barc"
+
+thread_local! {
+    /// Uma barra de ferramentas do caminho (barra de endereço do Explorador) está pintando.
+    static PINTANDO_CAMINHO: Cell<bool> = const { Cell::new(false) };
+}
+
+/// Marca a pintura das barras de ferramentas do caminho: a seta delas aponta para o lado. A
+/// pintura vai para um DC de memória, sem a janela, por isso a marca fica na linha de execução.
+unsafe extern "system" fn proc_caminho(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM, _: usize, _: usize) -> LRESULT {
+    match msg {
+        WM_PAINT | WM_PRINTCLIENT => {
+            let antes = PINTANDO_CAMINHO.replace(true);
+            let r = DefSubclassProc(h, msg, wp, lp);
+            PINTANDO_CAMINHO.set(antes);
+            r
+        }
+        WM_NCDESTROY => {
+            _ = RemoveWindowSubclass(h, Some(proc_caminho), ID_CAMINHO);
+            DefSubclassProc(h, msg, wp, lp)
+        }
+        _ => DefSubclassProc(h, msg, wp, lp),
+    }
+}
+
 // ---------- troca de tema ----------
 
 thread_local! {
@@ -595,6 +874,8 @@ enum Classe {
     Tarefa,
     Link,
     Assistente,
+    /// Barra de endereço e caixa de busca do Explorador.
+    Endereco,
 }
 
 /// Classe do tema pelo nome (GetThemeClass, ordinal 74 da uxtheme), sem o prefixo
@@ -638,6 +919,7 @@ fn classe(t: HTHEME) -> Option<Classe> {
         _ if igual("TrackBar") => Classe::Trilho,
         _ if igual("Spin") => Classe::Giro,
         _ if igual("Toolbar") => Classe::Ferramentas,
+        _ if igual("AddressBand") || igual("SearchBox") => Classe::Endereco,
         _ if igual("Rebar") => Classe::Rebar,
         _ if igual("Status") => Classe::Status,
         _ if igual("Tooltip") => Classe::Dica,
@@ -746,6 +1028,14 @@ impl Tela {
 fn pintar(c: Classe, t: &Tela, parte: i32, estado: i32) -> bool {
     match c {
         Classe::Botao => botao(t, parte, estado),
+        // ABP_ADDRESSBAND e SBP_SEARCHBOX: a caixa, como a de edição
+        Classe::Endereco => match parte {
+            1 => {
+                t.caixa(FUNDO, match estado { 2 => APAGADO, 4 => DESTAQUE, _ => MUDO });
+                true
+            }
+            _ => false,
+        },
         Classe::Edicao => match parte {
             // EP_EDITTEXT, EP_BACKGROUNDWITHBORDER e as bordas EP_EDITBORDER_*
             1 | 5 | 6..=9 => {
@@ -936,6 +1226,12 @@ fn pintar(c: Classe, t: &Tela, parte: i32, estado: i32) -> bool {
                     2 | 7 | 8 => t.fundo(FUNDO_CLARO),
                     3 | 5 | 6 => t.fundo(SELECAO),
                     _ => {}
+                }
+                // seta do botão dividido: para baixo; no caminho da barra de endereço, para o
+                // lado (para baixo com o menu aberto)
+                if parte == 4 {
+                    let lado = !matches!(estado, 3 | 5 | 6) && PINTANDO_CAMINHO.get();
+                    t.glifo(if lado { G_DIREITA } else { G_BAIXO }, if estado == 4 { MUDO } else { APAGADO }, 0.7);
                 }
                 true
             }

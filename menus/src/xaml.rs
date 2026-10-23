@@ -718,9 +718,10 @@ pub fn iniciar() {
     if exe.ends_with(r"\barra.exe") {
         return;
     }
+    // na shell o XAML fica de fora (`entrar`), mas o aviso de carga vale para o DirectUI e a
+    // faixa de opções do Explorador clássico
     if SHELL.iter().any(|n| exe.ends_with(&format!(r"\{n}"))) {
         FORA.store(true, Ordering::Relaxed);
-        return;
     }
     // o aviso de carga nunca sai: a DLL não pode sair do processo depois dele
     super::prender();
@@ -747,6 +748,9 @@ unsafe extern "system" fn carregada(motivo: u32, dados: *const DllCarregada, _: 
     let nome = String::from_utf16_lossy(std::slice::from_raw_parts(u.texto, u.bytes as usize / 2)).to_lowercase();
     if nome == "dui70.dll" {
         super::controles::instalar_dui();
+    }
+    if nome == "uiribbon.dll" {
+        super::controles::instalar_faixa();
     }
     if let Some(i) = DLLS_XAML.iter().position(|d| *d == nome) {
         entrar(i);
