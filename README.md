@@ -75,6 +75,10 @@ Ao sair, a barra do Windows volta como estava (estado guardado em `HKCU\Software
 - A lista das estacionadas fica em `%LOCALAPPDATA%\barra\estacionadas.txt`; se a barra morrer, a próxima execução traz todas de volta.
 - `barra --sair` fecha a barra que está rodando.
 
+## Início com o Windows
+
+"Iniciar com o Windows" cria a tarefa agendada `barra`, que abre a barra como administrador no logon (sem pedir o UAC), sem limite de tempo e com prioridade normal. Sem elevação o Windows não entrega à barra as teclas de um programa elevado em primeiro plano (o Alt+Tab e o Win+Tab voltam a ser os do Windows) nem deixa os ganchos do tema entrarem nele. Ligada numa barra sem elevação, a opção usa a chave `Run` do registro; na próxima vez que a barra abrir como administrador, troca a chave pela tarefa.
+
 ## Build
 
 ```

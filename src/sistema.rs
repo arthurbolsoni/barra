@@ -40,11 +40,97 @@ pub fn gravar(valor: PCWSTR, v: Option<u32>) {
     }
 }
 
-pub fn inicia_com_windows() -> bool {
+/// Tarefa agendada que abre a barra elevada no logon. Pela chave Run ela abriria sem elevação,
+/// e aí o Windows (UIPI) não deixa o gancho de teclado ver o Alt+Tab e o Win+Tab com um
+/// programa elevado em primeiro plano, nem os ganchos do tema entrarem nos programas elevados.
+const TAREFA: &str = "barra";
+
+fn schtasks(args: &[&str]) -> bool {
+    use std::os::windows::process::CommandExt;
+    std::process::Command::new("schtasks")
+        .args(args)
+        .creation_flags(0x0800_0000) // CREATE_NO_WINDOW
+        .output()
+        .is_ok_and(|s| s.status.success())
+}
+
+fn tem_tarefa() -> bool {
+    schtasks(&["/Query", "/TN", TAREFA])
+}
+
+fn tem_run() -> bool {
     unsafe { RegGetValueW(HKEY_CURRENT_USER, RUN_KEY, RUN_VALUE, RRF_RT_REG_SZ, None, None, None).is_ok() }
 }
 
+/// Cria (ou refaz) a tarefa do logon. Só funciona com a barra elevada.
+fn criar_tarefa() -> bool {
+    let Ok(exe) = std::env::current_exe() else { return false };
+    let usuario = format!(
+        "{}\\{}",
+        std::env::var("USERDOMAIN").unwrap_or_default(),
+        std::env::var("USERNAME").unwrap_or_default()
+    );
+    let esc = |s: &str| s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;");
+    // sem limite de tempo (o padrão do schtasks para a tarefa em 72 h), na bateria também e
+    // com prioridade normal (o padrão de tarefa é abaixo do normal)
+    let xml = format!(
+        r#"<?xml version="1.0" encoding="UTF-16"?>
+<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <Triggers><LogonTrigger><Enabled>true</Enabled><UserId>{u}</UserId></LogonTrigger></Triggers>
+  <Principals><Principal id="Author"><UserId>{u}</UserId><LogonType>InteractiveToken</LogonType><RunLevel>HighestAvailable</RunLevel></Principal></Principals>
+  <Settings>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>
+    <Priority>4</Priority>
+  </Settings>
+  <Actions Context="Author"><Exec><Command>{e}</Command></Exec></Actions>
+</Task>
+"#,
+        u = esc(&usuario),
+        e = esc(&exe.display().to_string())
+    );
+    let caminho = std::env::temp_dir().join("barra-tarefa.xml");
+    let bytes: Vec<u8> = [0xFEFFu16].into_iter().chain(xml.encode_utf16()).flat_map(u16::to_le_bytes).collect();
+    if std::fs::write(&caminho, bytes).is_err() {
+        return false;
+    }
+    let ok = schtasks(&["/Create", "/TN", TAREFA, "/XML", &caminho.to_string_lossy(), "/F"]);
+    _ = std::fs::remove_file(&caminho);
+    ok
+}
+
+pub fn inicia_com_windows() -> bool {
+    tem_run() || tem_tarefa()
+}
+
+/// Liga ou desliga o início com o Windows. Elevada, usa a tarefa agendada; sem elevação, a
+/// chave Run (criar tarefa elevada pede administrador).
 pub fn definir_inicio(ligar: bool) {
+    if !ligar {
+        if tem_tarefa() {
+            schtasks(&["/Delete", "/TN", TAREFA, "/F"]);
+        }
+        definir_run(false);
+    } else if unsafe { IsUserAnAdmin() }.as_bool() && criar_tarefa() {
+        definir_run(false);
+    } else {
+        definir_run(true);
+    }
+}
+
+/// Ao abrir elevada: troca a chave Run pela tarefa agendada.
+pub fn migrar_inicio() {
+    if !unsafe { IsUserAnAdmin() }.as_bool() {
+        return;
+    }
+    if tem_run() && criar_tarefa() {
+        definir_run(false);
+    }
+}
+
+fn definir_run(ligar: bool) {
     unsafe {
         let mut k = HKEY::default();
         if RegCreateKeyExW(HKEY_CURRENT_USER, RUN_KEY, None, None, REG_OPTION_NON_VOLATILE, KEY_SET_VALUE, None, &mut k, None).is_err() {

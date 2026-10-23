@@ -2031,6 +2031,7 @@ fn main() -> Result<()> {
 
         // a barra anterior morreu com janelas estacionadas: traz de volta antes de tudo
         grupos::recuperar();
+        sistema::migrar_inicio();
         if !cores_do_windows::ligadas() {
             cores_do_windows::restaurar();
         }
