@@ -1109,8 +1109,9 @@ unsafe fn botoes_de(dono: HWND) -> Vec<Botao> {
 /// Janela com botão na barra (o mesmo critério da barra, que é onde as molduras são pintadas)
 /// e com os botões da barra de título desenhados pelo Windows: a área do programa começa abaixo
 /// da barra de título, ou sobe até o alto com os botões do DWM por cima (apps XAML como o
-/// Gerenciador de Tarefas e a Configurações). Navegadores e Windows Terminal estendem a área
-/// do programa e desenham os próprios botões; ficam como estão.
+/// Gerenciador de Tarefas), ou a moldura dos apps UWP (Configurações), que desenha os botões
+/// numa janela filha. Navegadores e Windows Terminal estendem a área do programa e desenham os
+/// próprios botões; ficam como estão.
 unsafe fn titulo_do_windows(h: HWND) -> bool {
     if !IsWindowVisible(h).as_bool() || IsIconic(h).as_bool() || GetWindowTextLengthW(h) == 0 {
         return false;
@@ -1126,7 +1127,28 @@ unsafe fn titulo_do_windows(h: HWND) -> bool {
     if GetWindowRect(h, &mut j).is_err() || !ClientToScreen(h, &mut c).as_bool() {
         return false;
     }
-    !estendida(h, &j, c) || botoes_do_dwm(h, &j)
+    !estendida(h, &j, c) || botoes_do_dwm(h, &j) || botoes_da_moldura_uwp(h).is_some()
+}
+
+/// Janela filha em que o ApplicationFrameHost desenha os botões da moldura dos apps UWP, no
+/// canto direito (há outra, vazia, de tamanho zero). O desenho vem da composição: esconder a
+/// filha não o tira, então os botões do tema cobrem a faixa inteira dela.
+unsafe fn botoes_da_moldura_uwp(h: HWND) -> Option<HWND> {
+    let mut c = [0u16; 32];
+    let n = GetClassNameW(h, &mut c) as usize;
+    if c[..n] != *w!("ApplicationFrameWindow").as_wide() {
+        return None;
+    }
+    let mut f = None;
+    while let Ok(k) = FindWindowExW(Some(h), f, w!("ApplicationFrameTitleBarWindow"), None) {
+        let mut r = RECT::default();
+        _ = GetWindowRect(k, &mut r);
+        if r.right > r.left && IsWindowVisible(k).as_bool() {
+            return Some(k);
+        }
+        f = Some(k);
+    }
+    None
 }
 
 /// A área do programa sobe até a barra de título (não sobra a altura de uma barra de título
@@ -1290,8 +1312,15 @@ unsafe fn lugar_dos_botoes(dono: HWND, n: i32) -> Option<RECT> {
         // no lugar dos botões do DWM, da borda de cima até a altura deles
         let b = limites_do_dwm(dono, &j)?;
         let topo = if IsZoomed(dono).as_bool() { b.top } else { b.top.max(j.top + 1) };
-        let esquerda = b.right - n * px(CELULA, dpi);
-        return (b.bottom > topo && esquerda > j.left).then_some(RECT { left: esquerda, top: topo, right: b.right, bottom: b.bottom });
+        let (mut esquerda, mut base) = (b.right - n * px(CELULA, dpi), b.bottom);
+        if let Some(k) = botoes_da_moldura_uwp(dono) {
+            let mut f = RECT::default();
+            if GetWindowRect(k, &mut f).is_ok() {
+                esquerda = esquerda.min(f.left);
+                base = base.max(f.bottom);
+            }
+        }
+        return (base > topo && esquerda > j.left).then_some(RECT { left: esquerda, top: topo, right: b.right, bottom: base });
     }
     let ex = GetWindowLongW(dono, GWL_EXSTYLE) as u32;
     let aba = if ex & WS_EX_CLIENTEDGE.0 != 0 { GetSystemMetricsForDpi(SM_CXEDGE, dpi) } else { 0 };
@@ -1390,8 +1419,9 @@ unsafe fn botao_em(h: HWND, lp: LPARAM) -> Option<usize> {
     let mut c = RECT::default();
     GetClientRect(h, &mut c).ok()?;
     let dono = GetWindow(h, GW_OWNER).ok()?;
-    let i = x / px(CELULA, dpi_de(h));
-    (x >= 0 && y >= 0 && x < c.right && y < c.bottom && (i as usize) < botoes_de(dono).len()).then_some(i as usize)
+    let (n, cel) = (botoes_de(dono).len() as i32, px(CELULA, dpi_de(h)));
+    let x = x - (c.right - n * cel);
+    (x >= 0 && y >= 0 && x < n * cel && y < c.bottom).then_some((x / cel) as usize)
 }
 
 /// Clique no botão: o mesmo comando que os botões do Windows mandam.
@@ -1422,8 +1452,11 @@ unsafe fn pintar_botoes(h: HWND) {
         let cel = px(CELULA, dpi);
         let zoom = IsZoomed(dono).as_bool();
         let anterior = SelectObject(dc, fonte_de(dpi, TAMANHO_GLIFO, false).into());
-        for (i, b) in botoes_de(dono).into_iter().enumerate() {
-            let r = RECT { left: i as i32 * cel, top: 0, right: (i as i32 + 1) * cel, bottom: c.bottom };
+        let botoes = botoes_de(dono);
+        // colados à direita: na moldura UWP a janela cobre também a faixa dos botões dela
+        let x0 = c.right - botoes.len() as i32 * cel;
+        for (i, b) in botoes.into_iter().enumerate() {
+            let r = RECT { left: x0 + i as i32 * cel, top: 0, right: x0 + (i as i32 + 1) * cel, bottom: c.bottom };
             let sob = e.sob == Some(i);
             if sob {
                 preencher(dc, r, cor(if e.apertado == Some(i) { SELECAO } else { FUNDO_CLARO }));
