@@ -14,8 +14,11 @@ use std::os::windows::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use windows::core::{s, PCSTR, PCWSTR};
-use windows::Win32::Foundation::{FreeLibrary, HMODULE, LPARAM, LRESULT, WPARAM};
+use windows::core::{s, w, PCSTR, PCWSTR, PWSTR};
+use windows::Win32::Foundation::{FreeLibrary, LocalFree, HLOCAL, HMODULE, LPARAM, LRESULT, WPARAM};
+use windows::Win32::Security::Authorization::*;
+use windows::Win32::Security::{ACL, DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID, SUB_CONTAINERS_AND_OBJECTS_INHERIT};
+use windows::Win32::Storage::FileSystem::{FILE_GENERIC_EXECUTE, FILE_GENERIC_READ};
 use windows::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryW};
 use windows::Win32::System::SystemInformation::GetLocalTime;
 use windows::Win32::UI::WindowsAndMessaging::*;
@@ -113,10 +116,52 @@ fn desligar_copia(caminho: &Path) {
     }
 }
 
+/// Apps da Loja rodam em AppContainer e só carregam DLL de pasta com leitura para "ALL
+/// APPLICATION PACKAGES" (S-1-15-2-1) e "ALL RESTRICTED APPLICATION PACKAGES" (S-1-15-2-2).
+/// A permissão vai na pasta, herdada pelas cópias.
+fn liberar_para_apps(pasta: &Path) {
+    let nome = largo(pasta);
+    let caminho = PCWSTR(nome.as_ptr());
+    unsafe {
+        let mut dacl: *mut ACL = std::ptr::null_mut();
+        let mut sd = PSECURITY_DESCRIPTOR::default();
+        if GetNamedSecurityInfoW(caminho, SE_FILE_OBJECT, DACL_SECURITY_INFORMATION, None, None, Some(&mut dacl), None, &mut sd).is_err() {
+            return;
+        }
+        let mut sids = Vec::new();
+        for texto in [w!("S-1-15-2-1"), w!("S-1-15-2-2")] {
+            let mut sid = PSID::default();
+            if ConvertStringSidToSidW(texto, &mut sid).is_ok() {
+                sids.push(sid);
+            }
+        }
+        let entradas: Vec<EXPLICIT_ACCESS_W> = sids
+            .iter()
+            .map(|sid| EXPLICIT_ACCESS_W {
+                grfAccessPermissions: (FILE_GENERIC_READ | FILE_GENERIC_EXECUTE).0,
+                grfAccessMode: GRANT_ACCESS,
+                grfInheritance: SUB_CONTAINERS_AND_OBJECTS_INHERIT,
+                Trustee: TRUSTEE_W { TrusteeForm: TRUSTEE_IS_SID, TrusteeType: TRUSTEE_IS_WELL_KNOWN_GROUP, ptstrName: PWSTR(sid.0 as *mut u16), ..Default::default() },
+            })
+            .collect();
+        let mut nova: *mut ACL = std::ptr::null_mut();
+        if SetEntriesInAclW(Some(&entradas), Some(dacl), &mut nova).is_ok() {
+            _ = SetNamedSecurityInfoW(caminho, SE_FILE_OBJECT, DACL_SECURITY_INFORMATION, None, None, Some(nova), None);
+            _ = LocalFree(Some(HLOCAL(nova as *mut _)));
+        }
+        for sid in sids {
+            _ = LocalFree(Some(HLOCAL(sid.0)));
+        }
+        _ = LocalFree(Some(HLOCAL(sd.0)));
+    }
+}
+
 fn carregar() -> Option<Dlls> {
     let (pasta_menus, pasta_gancho) = (local("menus")?, local("gancho")?);
     let menus = copiar("barra_menus.dll", &pasta_menus)?;
     let gancho = copiar("barra_gancho.dll", &pasta_gancho)?;
+    liberar_para_apps(&pasta_menus);
+    liberar_para_apps(&pasta_gancho);
     limpar(&pasta_menus, &menus, true);
     limpar(&pasta_gancho, &gancho, false);
     unsafe {

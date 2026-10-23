@@ -295,7 +295,7 @@ Abre colado embaixo da barra, alinhado ao ícone (12 px antes dele) e preso à b
 Texto de 12 px em `texto`, centralizado, itens no formato "Tecla: ação" separados por "  ·  ". Win+Tab e Alt+Tab têm listas próprias. Com filtro ativo, a linha vira "Filtro: {texto}" em `destaque`.
 
 ### Moldura das outras janelas
-Aplicada pelo DWM: modo escuro conforme o tema, barra de título `fundo`, texto `texto`, borda `destaque` na janela em primeiro plano e `mudo` nas outras, cantos retos. Terminais recebem como ícone da barra de título o glifo `>_` (`f120`) em negrito, na cor `texto`, gerado em 16 e 32 px. Tudo volta ao padrão do Windows ao desligar a opção ou sair.
+Aplicada pelo DWM: modo escuro conforme o tema, barra de título `fundo`, texto `texto`, borda `destaque` na janela em primeiro plano e `mudo` nas outras, cantos retos, sem Mica nem Acrylic (`DWMWA_SYSTEMBACKDROP_TYPE` em nenhum; nos apps XAML, por baixo do conteúdo transparente fica a cor da barra de título). Terminais recebem como ícone da barra de título o glifo `>_` (`f120`) em negrito, na cor `texto`, gerado em 16 e 32 px. Tudo volta ao padrão do Windows ao desligar a opção ou sair.
 
 A barra pinta de fora as janelas com botão na barra. Diálogos com dona e janelas de ferramentas (Variáveis de Ambiente, caixas de mensagem de um programa) recebem a mesma moldura de dentro do programa, pela `barra_menus.dll`, com a borda em `destaque` enquanto estão ativas.
 
@@ -329,7 +329,9 @@ Controles Win32 dos outros programas planos e de canto vivo, nos papéis do tema
 - **Dica:** como a da barra, `fundo` com borda de 2 px em `destaque`.
 - **Caixa de tarefa e de mensagem:** área principal em `fundo`; faixa de baixo, com os botões, em `fundo-claro` com uma linha `mudo` em cima.
 
-Trocar o tema refaz as janelas abertas (`WM_SYSCOLORCHANGE`, `WM_THEMECHANGED` e redesenho). Programas sem os controles comuns versão 6 (sem manifesto) desenham os botões no estilo clássico, com bordas 3D que ainda saem nas cores do Windows.
+- **Apps XAML (WinUI 2 e 3):** os pincéis de tema do WinUI nos mesmos papéis. Fundos (`SolidBackgroundFillColor*`, `LayerFillColor*`, `ApplicationPageBackgroundThemeBrush`) em `fundo`, cartões e camadas elevadas em `fundo-claro`; botão (`ControlFillColorDefault`) em `fundo-claro`, sob o mouse e apertado em `selecao`; bordas e divisórias em `mudo`; texto em `texto`, secundário em `texto-apagado`, desabilitado em `mudo`; destaque em `destaque` e texto sobre ele em `fundo`; erro em `vermelho`. Pincel do próprio app com a cor de um desses ganha o mesmo papel.
+
+Trocar o tema refaz as janelas abertas (`WM_SYSCOLORCHANGE`, `WM_THEMECHANGED` e redesenho; nos apps XAML, o temporizador de cada linha de execução da interface vê a troca em até 1 s). Programas sem os controles comuns versão 6 (sem manifesto) desenham os botões no estilo clássico, com bordas 3D que ainda saem nas cores do Windows.
 
 ### Caixa de renomear grupo
 Campo de texto do Win32 sobre o cabeçalho do cartão: CaskaydiaMono Nerd Font 12 px em negrito, `texto-forte` sobre `fundo-claro`.

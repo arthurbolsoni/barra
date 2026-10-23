@@ -25,6 +25,8 @@ version = "0.1.0"
 dependencies = [
  "retour",
  "windows",
+ "windows-collections",
+ "windows-core",
 ]
 
 [[package]]

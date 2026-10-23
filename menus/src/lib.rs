@@ -27,6 +27,7 @@
 
 
 mod controles;
+mod xaml;
 
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
@@ -96,6 +97,15 @@ fn ligado() -> bool {
 fn cor(papel: usize) -> COLORREF {
     let c = CORES[papel].load(Ordering::Relaxed);
     COLORREF((c & 0xFF) << 16 | (c & 0xFF00) | (c >> 16) & 0xFF)
+}
+
+/// Carga da DLL num programa: o tema dos apps XAML entra pelo XAML Diagnostics (`xaml`).
+#[no_mangle]
+pub extern "system" fn DllMain(_: HMODULE, motivo: u32, _: *mut std::ffi::c_void) -> windows::core::BOOL {
+    if motivo == windows::Win32::System::SystemServices::DLL_PROCESS_ATTACH {
+        seguro((), xaml::iniciar);
+    }
+    TRUE
 }
 
 /// Executa sem deixar um pânico escapar para o programa hospedeiro.
@@ -205,6 +215,9 @@ pub extern "system" fn gancho_cbt(code: i32, wp: WPARAM, lp: LPARAM) -> LRESULT 
                 vestir_janela_de_menu(h, cs.hwndParent);
             } else {
                 controles::criada(h);
+                if cs.lpszClass.0 as usize > 0xFFFF {
+                    xaml::janela_criada(&cs.lpszClass.to_string().unwrap_or_default());
+                }
             }
         });
     }

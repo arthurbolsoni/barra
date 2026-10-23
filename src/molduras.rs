@@ -1,6 +1,7 @@
 //! Molduras das outras janelas no tema, como no Hyprland: barra de título na cor de fundo,
-//! borda de destaque na janela em foco e apagada nas outras, cantos retos. Tudo pelo DWM
-//! (DwmSetWindowAttribute vale para janela de outro processo), sem injetar nada.
+//! borda de destaque na janela em foco e apagada nas outras, cantos retos, sem o desfoque do
+//! Mica e do Acrylic. Tudo pelo DWM (DwmSetWindowAttribute vale para janela de outro processo),
+//! sem injetar nada.
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -26,6 +27,8 @@ struct Aplicada {
     frente: bool,
     /// Modo escuro que a janela tinha antes, para devolver na saída.
     escuro_antes: u32,
+    /// Mica ou Acrylic que a janela pedia (DWMWA_SYSTEMBACKDROP_TYPE), se a barra tirou.
+    desfoque_antes: Option<u32>,
     /// Terminal: ícones (grande, pequeno) de antes de trocar pelo glifo do tema.
     icone_antes: Option<(isize, isize)>,
 }
@@ -48,10 +51,21 @@ fn definir(h: HWND, atributo: DWMWINDOWATTRIBUTE, v: u32) {
     unsafe { _ = DwmSetWindowAttribute(h, atributo, &v as *const _ as *const c_void, 4) };
 }
 
-fn ler_escuro(h: HWND) -> u32 {
+fn ler(h: HWND, atributo: DWMWINDOWATTRIBUTE) -> u32 {
     let mut v = 0u32;
-    unsafe { _ = DwmGetWindowAttribute(h, DWMWA_USE_IMMERSIVE_DARK_MODE, &mut v as *mut _ as *mut c_void, 4) };
+    unsafe { _ = DwmGetWindowAttribute(h, atributo, &mut v as *mut _ as *mut c_void, 4) };
     v
+}
+
+/// Mica e Acrylic (DWMSBT_MAINWINDOW, TRANSIENTWINDOW e TABBEDWINDOW) saem: por baixo do
+/// conteúdo transparente dos apps XAML fica a cor da barra de título. O app pode pedir de novo
+/// (ao ativar, ao trocar o tema): a cada troca de foco confere outra vez.
+fn tirar_desfoque(h: HWND, a: &mut Aplicada) {
+    let atual = ler(h, DWMWA_SYSTEMBACKDROP_TYPE);
+    if (2..=4).contains(&atual) {
+        a.desfoque_antes.get_or_insert(atual);
+        definir(h, DWMWA_SYSTEMBACKDROP_TYPE, DWMSBT_NONE.0 as u32);
+    }
 }
 
 fn pintar(h: HWND, tema: &Tema, frente: bool) {
@@ -81,6 +95,9 @@ fn devolver(h: HWND, a: &Aplicada) {
     definir(h, DWMWA_BORDER_COLOR, COR_PADRAO);
     definir(h, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_DEFAULT.0 as u32);
     definir(h, DWMWA_USE_IMMERSIVE_DARK_MODE, a.escuro_antes);
+    if let Some(d) = a.desfoque_antes {
+        definir(h, DWMWA_SYSTEMBACKDROP_TYPE, d);
+    }
     if let Some((g, p)) = a.icone_antes {
         trocar_icone(h, g, p);
     }
@@ -111,10 +128,11 @@ pub fn sincronizar(tema: &'static Tema, atuais: &[isize], frente: isize, icones:
         m.janelas.retain(|&j, _| existe(j));
         for &j in atuais {
             let f = j == frente;
-            let a = m.janelas.entry(j).or_insert_with(|| Aplicada { tema: "", frente: !f, escuro_antes: ler_escuro(hwnd(j)), icone_antes: None });
+            let a = m.janelas.entry(j).or_insert_with(|| Aplicada { tema: "", frente: !f, escuro_antes: ler(hwnd(j), DWMWA_USE_IMMERSIVE_DARK_MODE), desfoque_antes: None, icone_antes: None });
             let tema_mudou = a.tema != tema.nome;
             if tema_mudou || a.frente != f {
                 pintar(hwnd(j), tema, f);
+                tirar_desfoque(hwnd(j), a);
                 a.tema = tema.nome;
                 a.frente = f;
             }
