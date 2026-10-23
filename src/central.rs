@@ -619,6 +619,9 @@ pub enum AlvoCentral {
     AbaPendencias(bool),
     Reabrir(usize),
     LinkConcluida(usize),
+    /// Linha inteira de uma rotina (o comando é `Rotina`).
+    RotinaLinha(usize),
+    Sessao(usize),
 }
 
 pub struct Central {
@@ -708,14 +711,6 @@ impl Central {
         true
     }
 
-    pub fn alternar_fonte(&mut self, i: usize) {
-        if let Some(f) = self.dados.fontes.get(i) {
-            if !self.ocultas.remove(&f.nome) {
-                self.ocultas.insert(f.nome.clone());
-            }
-        }
-    }
-
     pub fn alvo_em(&self, x: f32, y: f32) -> Option<AlvoCentral> {
         self.alvos.iter().find(|(r, _)| x >= r.left && x < r.right && y >= r.top && y < r.bottom).map(|(_, a)| *a)
     }
@@ -759,7 +754,7 @@ impl Central {
                 let p = d.prazos.get(i)?;
                 juntar(vec![p.titulo.clone(), p.data.format("%d/%m/%Y").to_string(), p.link.clone()])
             }
-            AlvoCentral::Rotina(i) => {
+            AlvoCentral::Rotina(i) | AlvoCentral::RotinaLinha(i) => {
                 let r = d.rotinas.get(i)?;
                 let prox = r.proxima.map(|z| format!("próxima {}", z.format("%d/%m/%Y"))).unwrap_or_default();
                 juntar(vec![r.titulo.clone(), r.quando.clone(), prox, r.executar.as_ref().map(|e| e.comando.clone()).unwrap_or_default()])
@@ -773,6 +768,31 @@ impl Central {
                 let f = d.fontes.get(i)?;
                 juntar(vec![rotulo_da_fonte(&f.nome), f.descricao.clone(), f.erro.clone().unwrap_or_default()])
             }
+            AlvoCentral::Sessao(i) => {
+                let se = d.sessoes.get(i)?;
+                let estado = match se.estado {
+                    EstadoSessao::Trabalhando => format!("em execução desde {}", se.inicio.format("%H:%M")),
+                    EstadoSessao::Permissao => format!("aguarda permissão desde {}", se.desde.format("%H:%M")),
+                    EstadoSessao::Concluida => format!("concluída às {}", se.desde.format("%H:%M")),
+                };
+                juntar(vec![format!("Sessão do Claude Code em {}", se.nome()), se.pasta.clone(), estado, se.mensagem.clone()])
+            }
+            AlvoCentral::Dia(dia) => {
+                let mut v = vec![dia.format("%d/%m/%Y").to_string()];
+                for e in d.eventos.iter().filter(|e| e.inicio.date() <= dia && e.fim.date() >= dia && (e.fim.date() > dia || e.fim > e.inicio || e.inicio.date() == dia)) {
+                    let h = if e.dia_inteiro { "dia inteiro".to_string() } else { format!("{}–{}", e.inicio.format("%H:%M"), e.fim.format("%H:%M")) };
+                    v.push(format!("{h}  {}", e.titulo));
+                }
+                for e in d.execucoes.iter().filter(|e| e.inicio.date() == dia) {
+                    v.push(format!("{}  {} ({})", e.inicio.format("%H:%M"), e.titulo, e.estado.rotulo()));
+                }
+                for p in d.prazos.iter().filter(|p| p.data == dia) {
+                    v.push(format!("prazo: {}", p.titulo));
+                }
+                juntar(v)
+            }
+            // o fundo do detalhe vale pelo item aberto
+            AlvoCentral::FecharDetalhe => self.texto_para_copiar_sel(),
             _ => None,
         }
     }
@@ -785,7 +805,9 @@ impl Central {
             AlvoCentral::Execucao(i) => d.execucoes.get(i).map(|e| e.fonte),
             AlvoCentral::Pendencia(i) | AlvoCentral::LinkPendencia(i) | AlvoCentral::ExecutarPendencia(i) => d.pendencias.get(i).map(|p| p.fonte),
             AlvoCentral::Prazo(i) => d.prazos.get(i).map(|p| p.fonte),
-            AlvoCentral::Rotina(i) => d.rotinas.get(i).map(|r| r.fonte),
+            AlvoCentral::Rotina(i) | AlvoCentral::RotinaLinha(i) => d.rotinas.get(i).map(|r| r.fonte),
+            AlvoCentral::Sessao(i) => return d.sessoes.get(i).map(|se| se.pasta.clone()).unwrap_or_default(),
+            AlvoCentral::FecharDetalhe => return self.alvo_sel().map(|a| self.pasta_de(a)).unwrap_or_default(),
             AlvoCentral::Reabrir(i) | AlvoCentral::LinkConcluida(i) => d.historico.get(i).and_then(|h| d.fontes.iter().position(|f| f.nome == h.fonte)),
             AlvoCentral::Fonte(i) | AlvoCentral::ExecutarFonte(i) => Some(i),
             _ => None,
@@ -793,13 +815,20 @@ impl Central {
         fonte.and_then(|f| d.fontes.get(f)).and_then(|f| f.executar.as_ref()).map(|e| e.pasta.clone()).unwrap_or_default()
     }
 
-    /// O que o Ctrl+C copia: o item aberto no detalhe, senão o que está sob o cursor.
-    pub fn texto_para_copiar(&self) -> Option<String> {
-        let sel = self.sel.map(|s| match s {
+    fn alvo_sel(&self) -> Option<AlvoCentral> {
+        self.sel.map(|s| match s {
             Sel::Evento(i) => AlvoCentral::Evento(i),
             Sel::Execucao(i) => AlvoCentral::Execucao(i),
-        });
-        sel.and_then(|a| self.texto_de(a)).or_else(|| self.hover.and_then(|a| self.texto_de(a)))
+        })
+    }
+
+    fn texto_para_copiar_sel(&self) -> Option<String> {
+        self.alvo_sel().and_then(|a| self.texto_de(a))
+    }
+
+    /// O que o Ctrl+C copia: o item aberto no detalhe, senão o que está sob o cursor.
+    pub fn texto_para_copiar(&self) -> Option<String> {
+        self.texto_para_copiar_sel().or_else(|| self.hover.and_then(|a| self.texto_de(a)))
     }
 
     pub fn alerta(&self, hoje: NaiveDate) -> bool {
@@ -826,28 +855,12 @@ pub fn semana_iso(d: NaiveDate) -> u32 {
     d.iso_week().week()
 }
 
-/// Abre o comando num terminal novo, sem elevação: a barra roda como administrador, e o que ela
-/// abre direto herdaria isso. O Explorer abre o `.cmd` com o usuário comum.
-pub fn executar(e: &Executar) {
-    let pasta_base = pasta().parent().map(|p| p.to_path_buf()).unwrap_or_else(std::env::temp_dir);
-    let arq = pasta_base.join("executar.cmd");
-    let dir = if e.pasta.is_empty() { std::env::var("USERPROFILE").unwrap_or_default() } else { e.pasta.clone() };
-    let script = format!("@echo off\r\nstart \"\" wt -d \"{dir}\" {}\r\n", e.comando);
-    if std::fs::write(&arq, script).is_err() {
-        return;
-    }
-    _ = std::process::Command::new("explorer.exe").arg(&arq).spawn();
-}
-
-/// Abre o Claude Code num Windows Terminal novo, sem elevação, em `dir_trabalho`, com `texto` já
-/// enviado como primeira mensagem. O texto vai por arquivo (`prompts\`), lido pelo pwsh e
-/// passado como um argumento só: aspas, quebras de linha e `%` chegam intactos.
-pub fn abrir_com_claude(texto: &str, dir_trabalho: &str) {
-    let base = pasta().parent().map(|p| p.to_path_buf()).unwrap_or_else(std::env::temp_dir);
-    let dir_prompts = base.join("prompts");
-    _ = std::fs::create_dir_all(&dir_prompts);
-    // os de mais de um dia já foram lidos
-    if let Ok(rd) = std::fs::read_dir(&dir_prompts) {
+/// Pasta dos scripts e prompts passados aos terminais abertos pela central; os de mais de um
+/// dia já foram usados e saem.
+fn pasta_terminal() -> std::path::PathBuf {
+    let dir = pasta().parent().map(|p| p.to_path_buf()).unwrap_or_else(std::env::temp_dir).join("terminal");
+    _ = std::fs::create_dir_all(&dir);
+    if let Ok(rd) = std::fs::read_dir(&dir) {
         for e in rd.flatten() {
             let velho = e.metadata().ok().and_then(|m| m.modified().ok()).and_then(|t| t.elapsed().ok()).is_some_and(|d| d.as_secs() > 86_400);
             if velho {
@@ -855,11 +868,41 @@ pub fn abrir_com_claude(texto: &str, dir_trabalho: &str) {
             }
         }
     }
-    let arq = dir_prompts.join(format!("{}.txt", Local::now().format("%Y%m%d-%H%M%S-%3f")));
+    dir
+}
+
+/// Texto entre aspas simples do PowerShell.
+fn aspas_ps(s: &str) -> String {
+    format!("'{}'", s.replace('\'', "''"))
+}
+
+/// Abre o comando (sintaxe do PowerShell) num pwsh novo, no console do Windows, como o atalho
+/// do AutoHotkey abre o Claude. Sem elevação: a barra roda como administrador, e o que ela abre
+/// direto herdaria isso; o Explorer abre o `.cmd` com o usuário comum. O comando vai num `.ps1`
+/// para não passar pelas regras de aspas do cmd.
+pub fn executar(e: &Executar) {
+    let dir_scripts = pasta_terminal();
+    let nome = Local::now().format("%Y%m%d-%H%M%S-%3f").to_string();
+    let ps1 = dir_scripts.join(format!("{nome}.ps1"));
+    let dir = if e.pasta.is_empty() { std::env::var("USERPROFILE").unwrap_or_default() } else { e.pasta.clone() };
+    // BOM: o Windows PowerShell e o pwsh leem o .ps1 com acento certo
+    let script = format!("\u{feff}Set-Location -LiteralPath {}\r\n{}\r\n", aspas_ps(&dir), e.comando);
+    let cmd = dir_scripts.join(format!("{nome}.cmd"));
+    let lancador = format!("@echo off\r\nstart \"\" /D \"{dir}\" pwsh.exe -NoExit -File \"{}\"\r\n", ps1.display());
+    if std::fs::write(&ps1, script).is_err() || std::fs::write(&cmd, lancador).is_err() {
+        return;
+    }
+    _ = std::process::Command::new("explorer.exe").arg(&cmd).spawn();
+}
+
+/// Abre o Claude Code num pwsh novo, sem elevação, em `dir_trabalho`, com `texto` já enviado
+/// como primeira mensagem. O texto vai por arquivo, lido pelo pwsh e passado como um argumento
+/// só: aspas, quebras de linha e `%` chegam intactos.
+pub fn abrir_com_claude(texto: &str, dir_trabalho: &str) {
+    let arq = pasta_terminal().join(format!("{}.txt", Local::now().format("%Y%m%d-%H%M%S-%3f")));
     if std::fs::write(&arq, texto).is_err() {
         return;
     }
-    let dir = if dir_trabalho.is_empty() { std::env::var("USERPROFILE").unwrap_or_default() } else { dir_trabalho.to_string() };
-    let comando = format!("pwsh -NoProfile -Command \"claude (Get-Content -Raw -Encoding utf8 -LiteralPath '{}')\"", arq.display());
-    executar(&Executar { rotulo: String::new(), pasta: dir, comando });
+    let comando = format!("claude --dangerously-skip-permissions (Get-Content -Raw -Encoding utf8 -LiteralPath {})", aspas_ps(&arq.display().to_string()));
+    executar(&Executar { rotulo: String::new(), pasta: dir_trabalho.to_string(), comando });
 }

@@ -52,8 +52,8 @@ Abre pelo relógio ou com Win+C, embaixo do relógio. Reúne agenda, rotinas, pe
 - Semana: domingo a sábado, com os compromissos e o resumo das execuções de cada dia; clique num dia abre o dia.
 - Pendências: o quadrado marca como concluída; o resto da linha abre o arquivo ou endereço da pendência. Fonte que oferece comando e não rodou hoje aparece como pendência, com o botão para executar. Sessão do Claude aguardando permissão também.
 - Prazos dos próximos 60 dias; mês com marca nos dias que têm itens (vermelha com execução com falha); rotinas com a última execução e a próxima; sessões do Claude em andamento ou concluídas na última meia hora; fontes com erro.
-- Teclas: ←→ dia (semana, na vista de semana), Tab alterna dia e semana, Home volta para hoje, 1–9 liga e desliga cada fonte, texto filtra pelo título, Esc limpa o filtro ou fecha.
-- Clique direito num item (compromisso, execução, pendência, prazo, rotina, fonte) abre o menu: "Copiar" põe o texto do item (título, data, local, link, descrição ou resumo) na área de transferência; "Abrir com o Claude" abre o Claude Code num Windows Terminal, na pasta da fonte, com esse texto já enviado. Ctrl+C copia o item aberto no detalhe ou o que está sob o cursor. Clicar na linha de uma pendência ou de um prazo não abre o arquivo dela.
+- Teclas: ←→ dia (semana, na vista de semana), Tab alterna dia e semana, Home volta para hoje, texto filtra pelo título, Esc limpa o filtro ou fecha.
+- Clique direito em qualquer item (compromisso, execução, detalhe aberto, pendência, concluída, prazo, rotina, sessão do Claude, fonte com erro, dia do calendário) abre o menu: "Copiar" põe o texto do item (título, data, local, link, descrição ou resumo) na área de transferência; "Abrir com o Claude" abre o Claude Code (`claude --dangerously-skip-permissions`) num pwsh novo no console do Windows, na pasta da fonte (na da sessão, para uma sessão do Claude), com esse texto já enviado. O dia do calendário copia os compromissos, execuções e prazos dele. Ctrl+C copia o item aberto no detalhe ou o que está sob o cursor. Clicar na linha de uma pendência ou de um prazo não abre o arquivo dela.
 - Na barra, ao lado do relógio: o próximo compromisso nos 30 minutos que o antecedem (amarelo nos últimos 5) e um quadrado vermelho quando há execução de hoje com falha ou sessão do Claude aguardando permissão.
 
 ### Fontes
@@ -88,7 +88,7 @@ Formato de `<fonte>.json`:
 ```
 
 - Datas: `AAAA-MM-DD` (dia inteiro), `AAAA-MM-DDTHH:MM` no horário local ou ISO 8601 com fuso. Campos fora `tipo`, `titulo` e as datas obrigatórias de cada tipo são opcionais.
-- `executar` abre o comando num Windows Terminal novo, na `pasta`, sem elevação (pelo Explorer, mesmo com a barra rodando como administrador).
+- `executar` abre o comando (sintaxe do PowerShell) num pwsh novo no console do Windows, na `pasta`, sem elevação (pelo Explorer, mesmo com a barra rodando como administrador). O comando vai num `.ps1` em `%LOCALAPPDATA%\barra\terminal`, apagado depois de um dia.
 - Pendência marcada na central vai para `central\acoes.jsonl`, uma linha por ação: `{"quando", "fonte", "id", "titulo", "acao": "concluir" | "reabrir"}`. A fonte aplica no registro dela e apaga as linhas que já aplicou; até lá, a barra mostra a pendência riscada.
 
 ### Serviço `barra-central`

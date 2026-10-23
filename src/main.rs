@@ -842,10 +842,7 @@ fn clicar_central(a: central::AlvoCentral) {
                 c.sel = None;
                 Depois::Nada
             }
-            A::Fonte(i) => {
-                c.alternar_fonte(i);
-                Depois::Nada
-            }
+            A::Fonte(_) | A::RotinaLinha(_) | A::Sessao(_) => Depois::Nada,
             A::Evento(i) => {
                 c.sel = if c.sel == Some(Sel::Evento(i)) { None } else { Some(Sel::Evento(i)) };
                 Depois::Nada
@@ -1039,12 +1036,6 @@ unsafe fn proc_central(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                 let c = &mut st.central;
                 if c.filtro.is_empty() {
                     if ch.is_whitespace() {
-                        return;
-                    }
-                    // sem filtro, 1–9 liga e desliga a fonte
-                    if let Some(n) = ch.to_digit(10).filter(|n| *n >= 1) {
-                        c.alternar_fonte(n as usize - 1);
-                        invalidar(h);
                         return;
                     }
                 }

@@ -159,33 +159,7 @@ impl Gfx {
             alvos.push((r, AlvoCentral::Vista(v)));
             x += lw + 2.0 * s;
         }
-        // fontes, da direita para a esquerda
-        let mut xd = w - 16.0 * s;
-        for (i, fo) in d.fontes.iter().enumerate().rev() {
-            let rotulo_f = format!("{}  {}", fo.glifo, rotulo_da_fonte(&fo.nome));
-            let lw = self.largura(&rotulo_f, &f)? + 16.0 * s;
-            let r = ret(xd - lw, 10.0 * s, xd, 34.0 * s);
-            let ligada = !c.ocultas.contains(&fo.nome);
-            if ligada {
-                self.preencher(r, k(t.selecao))?;
-            }
-            let tinta = if hover(AlvoCentral::Fonte(i)) {
-                t.texto_forte
-            } else if fo.erro.is_some() {
-                t.amarelo
-            } else if ligada {
-                t.texto
-            } else {
-                apagado
-            };
-            self.texto(&rotulo_f, &fc, r, k(tinta))?;
-            if !ligada {
-                let m = (r.top + r.bottom) / 2.0;
-                self.preencher(ret(r.left + 8.0 * s, m, r.right - 8.0 * s, m + 1.0 * s), k(t.mudo))?;
-            }
-            alvos.push((r, AlvoCentral::Fonte(i)));
-            xd = r.left - 4.0 * s;
-        }
+        let xd = w - 16.0 * s;
         x += 18.0 * s;
         if xd > x {
             let rf = ret(x, 0.0, xd - 12.0 * s, topo);
@@ -201,13 +175,10 @@ impl Gfx {
         let borda = 2.0 * s;
         let pe0 = h - borda - 28.0 * s;
         self.preencher(ret(0.0, pe0, w, pe0 + 1.0 * s), k(t.selecao))?;
-        let n_fontes = d.fontes.len().max(1);
-        let teclas_fontes = if n_fontes == 1 { "1".to_string() } else { format!("1–{n_fontes}") };
         let dicas = [
             ("←→", "dia ou semana anterior e seguinte"),
             ("tab", "alternar dia e semana"),
             ("home", "hoje"),
-            (teclas_fontes.as_str(), "fontes"),
             ("texto", "filtrar"),
             ("clique direito", "copiar ou abrir com o Claude"),
             ("esc", "fechar"),
@@ -302,6 +273,7 @@ impl Gfx {
                 self.texto(&format!("desde {}", hm(se.desde)), &fr, ret(xa, y, xb, y + linha), k(t.amarelo))?;
                 let msg = if se.mensagem.is_empty() { se.pasta.clone() } else { se.mensagem.clone() };
                 self.texto(&format!("{}  {msg}", crate::central::G_CLAUDE), &f, ret(xa + 22.0 * s, y + linha, xb, y + 2.0 * linha), k(apagado))?;
+                alvos.push((ret(xa - 6.0 * s, y - 4.0 * s, xb + 6.0 * s, y + 2.0 * linha + 4.0 * s), AlvoCentral::Sessao(i)));
                 y += 2.0 * linha + 10.0 * s;
             }
             // fontes que oferecem execução e não rodaram hoje
@@ -319,6 +291,7 @@ impl Gfx {
                 }
                 self.texto(&ex, &f, r, k(t.destaque))?;
                 alvos.push((r, AlvoCentral::ExecutarFonte(i)));
+                alvos.push((ret(xa - 6.0 * s, y - 4.0 * s, xb + 6.0 * s, y + 3.0 * linha + 4.0 * s), AlvoCentral::Fonte(i)));
                 y += 3.0 * linha + 12.0 * s;
             }
             for &i in &pend {
@@ -414,21 +387,26 @@ impl Gfx {
                 self.texto("prazos", &f, ret(xa, y, xb, y + linha), k(rotulo))?;
                 self.texto("próximos 60 dias", &fr, ret(xa, y, xb, y + linha), k(rotulo))?;
                 y += linha + 8.0 * s;
-                let mut lista: Vec<(NaiveDate, String, usize, Option<usize>)> = d
+                let mut lista: Vec<(NaiveDate, String, usize, AlvoCentral)> = d
                     .prazos
                     .iter()
                     .enumerate()
                     .filter(|(_, p)| c.visivel(p.fonte, &p.titulo))
-                    .map(|(i, p)| (p.data, p.titulo.clone(), p.fonte, Some(i)))
+                    .map(|(i, p)| (p.data, p.titulo.clone(), p.fonte, AlvoCentral::Prazo(i)))
                     .collect();
-                lista.extend(d.pendencias.iter().filter(|p| !d.concluida(p) && c.visivel(p.fonte, &p.titulo)).filter_map(|p| p.prazo.map(|pz| (pz, p.titulo.clone(), p.fonte, None))));
+                lista.extend(
+                    d.pendencias
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, p)| !d.concluida(p) && c.visivel(p.fonte, &p.titulo))
+                        .filter_map(|(j, p)| p.prazo.map(|pz| (pz, p.titulo.clone(), p.fonte, AlvoCentral::LinkPendencia(j)))),
+                );
                 lista.retain(|(dt, _, _, _)| (*dt - hoje).num_days() <= 60);
                 lista.sort_by_key(|(dt, _, _, _)| *dt);
                 let alt = 24.0 * s;
-                for (dt, tit, fo, idx) in &lista {
+                for (dt, tit, fo, al) in &lista {
                     let r = ret(xa - 6.0 * s, y, xb + 6.0 * s, y + alt);
-                    let tem_link = idx.is_some_and(|i| !d.prazos[i].link.is_empty());
-                    if tem_link && hover(AlvoCentral::Prazo(idx.unwrap_or(0))) {
+                    if hover(*al) {
                         self.preencher(r, k(t.fundo_claro))?;
                     }
                     let (q, n) = quando(*dt, hoje);
@@ -437,9 +415,7 @@ impl Gfx {
                     self.glifo(fonte_g(*fo), &fg, ret(xa - 4.0 * s, y, xa + 16.0 * s, y + alt), k(apagado))?;
                     self.texto(tit, &f, ret(xa + 22.0 * s, y, xb - lq - 14.0 * s, y + alt), k(t.texto))?;
                     self.texto(&q, &fr, ret(xa, y, xb, y + alt), k(tinta))?;
-                    if let (true, Some(i)) = (tem_link, idx) {
-                        alvos.push((r, AlvoCentral::Prazo(*i)));
-                    }
+                    alvos.push((r, *al));
                     y += alt;
                 }
                 if lista.is_empty() {
@@ -587,6 +563,7 @@ impl Gfx {
                     fim_sub = r.left - 10.0 * s;
                 }
                 self.texto(&sub, &f, ret(xa + 20.0 * s, y + linha, fim_sub, y + 2.0 * linha), k(apagado))?;
+                alvos.push((ret(xa - 6.0 * s, y - 3.0 * s, xb + 6.0 * s, y + 2.0 * linha + 3.0 * s), AlvoCentral::RotinaLinha(i)));
                 y += 2.0 * linha + 8.0 * s;
             }
             if resto > 0 {
@@ -602,7 +579,7 @@ impl Gfx {
             y += 8.0 * s;
             self.texto("sessões do Claude", &f, ret(xa, y, xb, y + linha), k(rotulo))?;
             y += linha + 6.0 * s;
-            for se in &d.sessoes {
+            for (i, se) in d.sessoes.iter().enumerate() {
                 if y + linha > limite {
                     break;
                 }
@@ -615,19 +592,20 @@ impl Gfx {
                 let le = self.largura(&estado, &f)? + 10.0 * s;
                 self.texto(se.nome(), &f, ret(xa + 20.0 * s, y, xb - le, y + linha), k(t.texto))?;
                 self.texto(&estado, &fr, ret(xa, y, xb, y + linha), k(apagado))?;
+                alvos.push((ret(xa - 6.0 * s, y - 3.0 * s, xb + 6.0 * s, y + linha + 3.0 * s), AlvoCentral::Sessao(i)));
                 y += linha + 6.0 * s;
             }
         }
 
         // fontes com problema
-        let problemas: Vec<&crate::central::Fonte> = d.fontes.iter().filter(|f| f.erro.is_some()).collect();
+        let problemas: Vec<(usize, &crate::central::Fonte)> = d.fontes.iter().enumerate().filter(|(_, f)| f.erro.is_some()).collect();
         if !problemas.is_empty() && y + 4.0 * linha < limite {
             y += 4.0 * s;
             self.preencher(ret(xa, y, xb, y + 1.0 * s), k(t.selecao))?;
             y += 8.0 * s;
             self.texto("fontes", &f, ret(xa, y, xb, y + linha), k(rotulo))?;
             y += linha + 6.0 * s;
-            for fo in problemas {
+            for (i, fo) in problemas {
                 if y + 3.0 * linha > limite {
                     break;
                 }
@@ -637,6 +615,7 @@ impl Gfx {
                 let msg = format!("{}{quando_ok}", fo.erro.clone().unwrap_or_default());
                 let alt = (limite - y - linha).min(4.0 * linha);
                 self.texto(&msg, &fq, ret(xa + 20.0 * s, y + linha + 2.0 * s, xb, y + linha + alt), k(apagado))?;
+                alvos.push((ret(xa - 6.0 * s, y - 3.0 * s, xb + 6.0 * s, y + linha + alt), AlvoCentral::Fonte(i)));
                 y += linha + alt + 8.0 * s;
             }
         }
