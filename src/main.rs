@@ -960,6 +960,18 @@ unsafe fn proc_central(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
             }
             LRESULT(0)
         }
+        WM_TIMER if wp.0 == 7 => {
+            _ = KillTimer(Some(h), 7);
+            invalidar(h);
+            LRESULT(0)
+        }
+        WM_RBUTTONUP => {
+            let (x, y) = xy(lp);
+            if let Some(Some(texto)) = com(|st| st.central.alvo_em(x as f32, y as f32).and_then(|a| st.central.texto_de(a))) {
+                copiar_da_central(h, &texto);
+            }
+            LRESULT(0)
+        }
         WM_MOUSEWHEEL => {
             let delta = ((wp.0 >> 16) & 0xFFFF) as i16;
             // sobre as pendências rola a lista; no resto troca o dia
@@ -986,6 +998,12 @@ unsafe fn proc_central(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                     invalidar(h);
                 } else {
                     fechar_central(true);
+                }
+                return LRESULT(0);
+            }
+            if vk.0 == b'C' as u16 && GetKeyState(VK_CONTROL.0 as i32) < 0 {
+                if let Some(Some(texto)) = com(|st| st.central.texto_para_copiar()) {
+                    copiar_da_central(h, &texto);
                 }
                 return LRESULT(0);
             }
@@ -1038,6 +1056,16 @@ unsafe fn proc_central(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
             DefWindowProcW(h, msg, wp, lp)
         }
         _ => DefWindowProcW(h, msg, wp, lp),
+    }
+}
+
+/// Copia para a área de transferência e mostra "copiado" no rodapé da central.
+fn copiar_da_central(h: HWND, texto: &str) {
+    if sistema::copiar(h, texto) {
+        _ = com(|st| st.central.copiado = Some(std::time::Instant::now()));
+        invalidar(h);
+        // apaga o aviso depois de 1,5 s
+        unsafe { _ = SetTimer(Some(h), 7, 1600, None) };
     }
 }
 

@@ -209,6 +209,7 @@ impl Gfx {
             ("home", "hoje"),
             (teclas_fontes.as_str(), "fontes"),
             ("texto", "filtrar"),
+            ("clique direito", "copiar"),
             ("esc", "fechar"),
         ];
         let mut xp = 16.0 * s;
@@ -219,6 +220,9 @@ impl Gfx {
             let lo = self.largura(o_que, &f)?;
             self.texto(o_que, &f, ret(xp, pe0, xp + lo + 2.0, h - borda), k(t.texto_escuro))?;
             xp += lo + 20.0 * s;
+        }
+        if c.copiado.is_some_and(|t0| t0.elapsed().as_millis() < 1500) {
+            self.texto("copiado", &fr, ret(xp, pe0, w - 16.0 * s, h - borda), k(t.verde))?;
         }
 
         // ---------- colunas ----------

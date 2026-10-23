@@ -53,6 +53,7 @@ Abre pelo relógio ou com Win+C, embaixo do relógio. Reúne agenda, rotinas, pe
 - Pendências: o quadrado marca como concluída; o resto da linha abre o arquivo ou endereço da pendência. Fonte que oferece comando e não rodou hoje aparece como pendência, com o botão para executar. Sessão do Claude aguardando permissão também.
 - Prazos dos próximos 60 dias; mês com marca nos dias que têm itens (vermelha com execução com falha); rotinas com a última execução e a próxima; sessões do Claude em andamento ou concluídas na última meia hora; fontes com erro.
 - Teclas: ←→ dia (semana, na vista de semana), Tab alterna dia e semana, Home volta para hoje, 1–9 liga e desliga cada fonte, texto filtra pelo título, Esc limpa o filtro ou fecha.
+- Copiar: clique direito num item (compromisso, execução, pendência, prazo, rotina, fonte) copia o texto dele (título, data, local, link, descrição ou resumo); Ctrl+C copia o item aberto no detalhe ou o que está sob o cursor. O rodapé mostra "copiado".
 - Na barra, ao lado do relógio: o próximo compromisso nos 30 minutos que o antecedem (amarelo nos últimos 5) e um quadrado vermelho quando há execução de hoje com falha ou sessão do Claude aguardando permissão.
 
 ### Fontes

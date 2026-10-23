@@ -233,3 +233,33 @@ pub fn barra_windows_escondida() -> bool {
 pub fn abrir_uri(uri: PCWSTR) {
     unsafe { ShellExecuteW(None, w!("open"), uri, PCWSTR::null(), PCWSTR::null(), SW_SHOWNORMAL) };
 }
+
+/// Põe `texto` na área de transferência (CF_UNICODETEXT).
+pub fn copiar(dono: HWND, texto: &str) -> bool {
+    use windows::Win32::System::DataExchange::{CloseClipboard, EmptyClipboard, OpenClipboard, SetClipboardData};
+    use windows::Win32::System::Memory::{GlobalAlloc, GlobalLock, GlobalUnlock, GMEM_MOVEABLE};
+    const CF_UNICODETEXT: u32 = 13;
+    let u: Vec<u16> = texto.encode_utf16().chain([0]).collect();
+    unsafe {
+        let Ok(mem) = GlobalAlloc(GMEM_MOVEABLE, u.len() * 2) else { return false };
+        let p = GlobalLock(mem) as *mut u16;
+        if p.is_null() {
+            _ = GlobalFree(Some(mem));
+            return false;
+        }
+        std::ptr::copy_nonoverlapping(u.as_ptr(), p, u.len());
+        _ = GlobalUnlock(mem);
+        if OpenClipboard(Some(dono)).is_err() {
+            _ = GlobalFree(Some(mem));
+            return false;
+        }
+        _ = EmptyClipboard();
+        // com sucesso, a memória passa a ser do sistema
+        let ok = SetClipboardData(CF_UNICODETEXT, Some(HANDLE(mem.0))).is_ok();
+        if !ok {
+            _ = GlobalFree(Some(mem));
+        }
+        _ = CloseClipboard();
+        ok
+    }
+}

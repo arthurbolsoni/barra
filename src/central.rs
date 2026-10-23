@@ -647,6 +647,8 @@ pub struct Central {
     /// (fonte, id) marcados desde que a central abriu: seguem riscados na aba de abertas,
     /// para a lista não mudar embaixo do cursor.
     pub recem: HashSet<(String, String)>,
+    /// Última cópia para a área de transferência (aviso "copiado" no rodapé).
+    pub copiado: Option<std::time::Instant>,
 }
 
 impl Default for Central {
@@ -670,6 +672,7 @@ impl Default for Central {
             rolagem_max: Cell::new(0.0),
             aba_concluidas: false,
             recem: HashSet::new(),
+            copiado: None,
         }
     }
 }
@@ -728,6 +731,61 @@ impl Central {
     }
 
     /// Execução de hoje com falha ou sessão aguardando permissão.
+    /// Texto de um item da central para a área de transferência.
+    pub fn texto_de(&self, a: AlvoCentral) -> Option<String> {
+        let d = &self.dados;
+        let hm = |t: NaiveDateTime| t.format("%d/%m/%Y %H:%M").to_string();
+        let juntar = |partes: Vec<String>| Some(partes.into_iter().filter(|p| !p.trim().is_empty()).collect::<Vec<_>>().join("\n"));
+        match a {
+            AlvoCentral::Evento(i) => {
+                let e = d.eventos.get(i)?;
+                let quando = if e.dia_inteiro { e.inicio.format("%d/%m/%Y").to_string() } else { format!("{} – {}", hm(e.inicio), e.fim.format("%H:%M")) };
+                juntar(vec![e.titulo.clone(), quando, e.local.clone(), e.reuniao.clone(), e.descricao.clone()])
+            }
+            AlvoCentral::Execucao(i) => {
+                let e = d.execucoes.get(i)?;
+                let quando = match e.fim {
+                    Some(f) => format!("{} – {} · {}", hm(e.inicio), f.format("%H:%M"), e.estado.rotulo()),
+                    None => format!("{} · {}", hm(e.inicio), e.estado.rotulo()),
+                };
+                juntar(vec![e.titulo.clone(), quando, e.resumo.clone(), e.registro.clone()])
+            }
+            AlvoCentral::Pendencia(i) | AlvoCentral::LinkPendencia(i) | AlvoCentral::ExecutarPendencia(i) => {
+                let p = d.pendencias.get(i)?;
+                let prazo = p.prazo.map(|z| format!("prazo {}", z.format("%d/%m/%Y"))).unwrap_or_default();
+                juntar(vec![p.titulo.clone(), p.origem.clone(), prazo, p.link.clone()])
+            }
+            AlvoCentral::Prazo(i) => {
+                let p = d.prazos.get(i)?;
+                juntar(vec![p.titulo.clone(), p.data.format("%d/%m/%Y").to_string(), p.link.clone()])
+            }
+            AlvoCentral::Rotina(i) => {
+                let r = d.rotinas.get(i)?;
+                let prox = r.proxima.map(|z| format!("próxima {}", z.format("%d/%m/%Y"))).unwrap_or_default();
+                juntar(vec![r.titulo.clone(), r.quando.clone(), prox, r.executar.as_ref().map(|e| e.comando.clone()).unwrap_or_default()])
+            }
+            AlvoCentral::Reabrir(i) | AlvoCentral::LinkConcluida(i) => {
+                let h = d.historico.get(i)?;
+                juntar(vec![h.titulo.clone(), h.origem.clone(), format!("concluída em {}", hm(h.quando)), h.link.clone()])
+            }
+            AlvoCentral::ExecutarFonte(i) => d.fontes.get(i)?.executar.as_ref().map(|e| e.comando.clone()),
+            AlvoCentral::Fonte(i) => {
+                let f = d.fontes.get(i)?;
+                juntar(vec![rotulo_da_fonte(&f.nome), f.descricao.clone(), f.erro.clone().unwrap_or_default()])
+            }
+            _ => None,
+        }
+    }
+
+    /// O que o Ctrl+C copia: o item aberto no detalhe, senão o que está sob o cursor.
+    pub fn texto_para_copiar(&self) -> Option<String> {
+        let sel = self.sel.map(|s| match s {
+            Sel::Evento(i) => AlvoCentral::Evento(i),
+            Sel::Execucao(i) => AlvoCentral::Execucao(i),
+        });
+        sel.and_then(|a| self.texto_de(a)).or_else(|| self.hover.and_then(|a| self.texto_de(a)))
+    }
+
     pub fn alerta(&self, hoje: NaiveDate) -> bool {
         self.dados.execucoes.iter().any(|e| e.inicio.date() == hoje && e.estado == Estado::Falha)
             || self.dados.sessoes.iter().any(|s| s.estado == EstadoSessao::Permissao)
