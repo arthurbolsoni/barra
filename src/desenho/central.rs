@@ -209,7 +209,7 @@ impl Gfx {
             ("home", "hoje"),
             (teclas_fontes.as_str(), "fontes"),
             ("texto", "filtrar"),
-            ("clique direito", "copiar"),
+            ("clique direito", "copiar ou abrir com o Claude"),
             ("esc", "fechar"),
         ];
         let mut xp = 16.0 * s;

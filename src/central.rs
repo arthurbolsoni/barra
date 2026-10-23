@@ -777,6 +777,22 @@ impl Central {
         }
     }
 
+    /// Pasta de trabalho da fonte do item (a do comando dela; vazia = pasta do usuário).
+    pub fn pasta_de(&self, a: AlvoCentral) -> String {
+        let d = &self.dados;
+        let fonte = match a {
+            AlvoCentral::Evento(i) => d.eventos.get(i).map(|e| e.fonte),
+            AlvoCentral::Execucao(i) => d.execucoes.get(i).map(|e| e.fonte),
+            AlvoCentral::Pendencia(i) | AlvoCentral::LinkPendencia(i) | AlvoCentral::ExecutarPendencia(i) => d.pendencias.get(i).map(|p| p.fonte),
+            AlvoCentral::Prazo(i) => d.prazos.get(i).map(|p| p.fonte),
+            AlvoCentral::Rotina(i) => d.rotinas.get(i).map(|r| r.fonte),
+            AlvoCentral::Reabrir(i) | AlvoCentral::LinkConcluida(i) => d.historico.get(i).and_then(|h| d.fontes.iter().position(|f| f.nome == h.fonte)),
+            AlvoCentral::Fonte(i) | AlvoCentral::ExecutarFonte(i) => Some(i),
+            _ => None,
+        };
+        fonte.and_then(|f| d.fontes.get(f)).and_then(|f| f.executar.as_ref()).map(|e| e.pasta.clone()).unwrap_or_default()
+    }
+
     /// O que o Ctrl+C copia: o item aberto no detalhe, senão o que está sob o cursor.
     pub fn texto_para_copiar(&self) -> Option<String> {
         let sel = self.sel.map(|s| match s {
@@ -821,4 +837,29 @@ pub fn executar(e: &Executar) {
         return;
     }
     _ = std::process::Command::new("explorer.exe").arg(&arq).spawn();
+}
+
+/// Abre o Claude Code num Windows Terminal novo, sem elevação, em `dir_trabalho`, com `texto` já
+/// enviado como primeira mensagem. O texto vai por arquivo (`prompts\`), lido pelo pwsh e
+/// passado como um argumento só: aspas, quebras de linha e `%` chegam intactos.
+pub fn abrir_com_claude(texto: &str, dir_trabalho: &str) {
+    let base = pasta().parent().map(|p| p.to_path_buf()).unwrap_or_else(std::env::temp_dir);
+    let dir_prompts = base.join("prompts");
+    _ = std::fs::create_dir_all(&dir_prompts);
+    // os de mais de um dia já foram lidos
+    if let Ok(rd) = std::fs::read_dir(&dir_prompts) {
+        for e in rd.flatten() {
+            let velho = e.metadata().ok().and_then(|m| m.modified().ok()).and_then(|t| t.elapsed().ok()).is_some_and(|d| d.as_secs() > 86_400);
+            if velho {
+                _ = std::fs::remove_file(e.path());
+            }
+        }
+    }
+    let arq = dir_prompts.join(format!("{}.txt", Local::now().format("%Y%m%d-%H%M%S-%3f")));
+    if std::fs::write(&arq, texto).is_err() {
+        return;
+    }
+    let dir = if dir_trabalho.is_empty() { std::env::var("USERPROFILE").unwrap_or_default() } else { dir_trabalho.to_string() };
+    let comando = format!("pwsh -NoProfile -Command \"claude (Get-Content -Raw -Encoding utf8 -LiteralPath '{}')\"", arq.display());
+    executar(&Executar { rotulo: String::new(), pasta: dir, comando });
 }

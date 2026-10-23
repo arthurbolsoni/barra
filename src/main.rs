@@ -881,11 +881,11 @@ fn clicar_central(a: central::AlvoCentral) {
                 c.dados.reabrir(i);
                 Depois::Nada
             }
-            A::LinkConcluida(i) => c.dados.historico.get(i).map(|h| Depois::Abrir(h.link.clone())).unwrap_or(Depois::Nada),
-            A::LinkPendencia(i) => d.pendencias.get(i).map(|p| Depois::Abrir(p.link.clone())).unwrap_or(Depois::Nada),
+            // a linha da pendência, da concluída e do prazo não abre o arquivo: copiar e
+            // abrir com o Claude ficam no menu do clique direito
+            A::LinkConcluida(_) | A::LinkPendencia(_) | A::Prazo(_) => Depois::Nada,
             A::ExecutarPendencia(i) => d.pendencias.get(i).and_then(|p| p.executar.clone()).map(Depois::Executar).unwrap_or(Depois::Nada),
             A::ExecutarFonte(i) => d.fontes.get(i).and_then(|f| f.executar.clone()).map(Depois::Executar).unwrap_or(Depois::Nada),
-            A::Prazo(i) => d.prazos.get(i).map(|p| Depois::Abrir(p.link.clone())).unwrap_or(Depois::Nada),
             A::Rotina(i) => d.rotinas.get(i).and_then(|r| r.executar.clone()).map(Depois::Executar).unwrap_or(Depois::Nada),
             A::MesAnterior | A::MesSeguinte => {
                 let m = c.mes;
@@ -967,8 +967,12 @@ unsafe fn proc_central(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
         }
         WM_RBUTTONUP => {
             let (x, y) = xy(lp);
-            if let Some(Some(texto)) = com(|st| st.central.alvo_em(x as f32, y as f32).and_then(|a| st.central.texto_de(a))) {
-                copiar_da_central(h, &texto);
+            let item = com(|st| {
+                let a = st.central.alvo_em(x as f32, y as f32)?;
+                Some((st.central.texto_de(a)?, st.central.pasta_de(a)))
+            });
+            if let Some(Some((texto, pasta))) = item {
+                menu_central(h, &texto, &pasta);
             }
             LRESULT(0)
         }
@@ -1056,6 +1060,22 @@ unsafe fn proc_central(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
             DefWindowProcW(h, msg, wp, lp)
         }
         _ => DefWindowProcW(h, msg, wp, lp),
+    }
+}
+
+/// Menu do clique direito num item da central.
+fn menu_central(h: HWND, texto: &str, pasta: &str) {
+    const COPIAR: usize = 1;
+    const CLAUDE: usize = 2;
+    let itens = vec![(COPIAR, "Copiar".to_string(), false, true), (CLAUDE, "Abrir com o Claude".to_string(), false, true)];
+    let Some(m) = montar_menu(&itens) else { return };
+    match mostrar_menu(h, m, cursor(), false) {
+        COPIAR => copiar_da_central(h, texto),
+        CLAUDE => {
+            fechar_central(false);
+            central::abrir_com_claude(texto, pasta);
+        }
+        _ => {}
     }
 }
 
