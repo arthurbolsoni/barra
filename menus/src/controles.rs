@@ -569,9 +569,17 @@ unsafe extern "system" fn set_bk_color(dc: HDC, c: COLORREF) -> COLORREF {
 }
 
 /// Pincel e caneta do DC (DC_BRUSH, DC_PEN) num desses cinzas: o separador do painel da
-/// esquerda do Explorador é pintado assim.
+/// esquerda do Explorador é pintado assim. A faixa de opções pinta a fileira das abas com o
+/// pincel do DC em preto, fixo no modo escuro, fora das cores globais: o preto pedido pelo
+/// uiribbon.dll vira o fundo do tema (preto é preto no resto).
 unsafe extern "system" fn set_dc_brush_color(dc: HDC, c: COLORREF) -> COLORREF {
-    let c = if ligado() { papel_do_cinza(c.0).map_or(c, cor) } else { c };
+    let c = if ligado() {
+        papel_do_cinza(c.0)
+            .or_else(|| (c.0 & 0x00FF_FFFF == 0 && crate::MODO.load(Ordering::Relaxed) == crate::ESCURO && seguro(false, chamado_pela_faixa)).then_some(FUNDO))
+            .map_or(c, cor)
+    } else {
+        c
+    };
     original::<FSetBkColor>(&SET_DC_BRUSH_COLOR)(dc, c)
 }
 
@@ -617,7 +625,7 @@ fn chamado_pela_faixa() -> bool {
         let nt = inicio + *((inicio + 0x3C) as *const u32) as usize;
         inicio + *((nt + 0x50) as *const u32) as usize
     };
-    let mut quadros = [std::ptr::null_mut(); 3];
+    let mut quadros = [std::ptr::null_mut(); 6];
     let n = unsafe { windows::Win32::System::Diagnostics::Debug::RtlCaptureStackBackTrace(1, &mut quadros, None) } as usize;
     quadros[..n].iter().any(|&q| (inicio..fim).contains(&(q as usize)))
 }
@@ -783,7 +791,7 @@ unsafe fn devolver_textura(h: HWND) {
     }
 }
 
-fn classe_da_janela(h: HWND, nome: &str) -> bool {
+pub(crate) fn classe_da_janela(h: HWND, nome: &str) -> bool {
     let mut b = [0u16; 32];
     let n = unsafe { GetClassNameW(h, &mut b) } as usize;
     n == nome.len() && b[..n].iter().zip(nome.encode_utf16()).all(|(a, c)| *a == c)

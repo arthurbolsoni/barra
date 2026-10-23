@@ -121,6 +121,9 @@ pub fn explorador_classico() -> bool {
 }
 
 pub fn definir_explorador_classico(ligar: bool) {
+    if ligar {
+        faixa_recolhida();
+    }
     for c in EXPLORADOR_XAML {
         unsafe {
             if ligar {
@@ -135,6 +138,17 @@ pub fn definir_explorador_classico(ligar: bool) {
             } else {
                 _ = RegDeleteTreeW(HKEY_CURRENT_USER, c);
             }
+        }
+    }
+}
+
+/// Faixa de opções do Explorador recolhida (só a fileira das abas), como o Ctrl+F1 deixa.
+fn faixa_recolhida() {
+    unsafe {
+        let mut k = HKEY::default();
+        if RegCreateKeyExW(HKEY_CURRENT_USER, w!(r"Software\Microsoft\Windows\CurrentVersion\Explorer\Ribbon"), None, None, REG_OPTION_NON_VOLATILE, KEY_SET_VALUE, None, &mut k, None).is_ok() {
+            _ = RegSetValueExW(k, w!("MinimizedStateTabletModeOff"), None, REG_DWORD, Some(&1u32.to_le_bytes()));
+            _ = RegCloseKey(k);
         }
     }
 }
