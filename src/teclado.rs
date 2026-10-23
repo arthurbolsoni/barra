@@ -2,12 +2,11 @@
 //!
 //! O gancho roda no laço de mensagens mas não toca no estado: só posta para a barra.
 //! Janela de programa rodando como administrador em foco não passa pelo gancho, e aí o
-//! Alt+Tab do Windows aparece; jogo ou vídeo em tela cheia também fica com o do Windows.
+//! Alt+Tab do Windows aparece.
 
 use std::sync::atomic::{AtomicBool, AtomicIsize, Ordering};
 
 use windows::Win32::Foundation::*;
-use windows::Win32::Graphics::Gdi::{GetMonitorInfoW, MonitorFromWindow, MONITORINFO, MONITOR_DEFAULTTONEAREST};
 use windows::Win32::UI::Input::KeyboardAndMouse::*;
 use windows::Win32::UI::WindowsAndMessaging::*;
 
@@ -36,29 +35,6 @@ fn apertada(vk: VIRTUAL_KEY) -> bool {
     unsafe { GetAsyncKeyState(vk.0 as i32) as u16 & 0x8000 != 0 }
 }
 
-/// Janela em tela cheia na frente (jogo, vídeo, F11).
-fn tela_cheia_na_frente() -> bool {
-    unsafe {
-        let fg = GetForegroundWindow();
-        // a visão geral também cobre o monitor inteiro: janela da própria barra não conta
-        let mut pid = 0u32;
-        GetWindowThreadProcessId(fg, Some(&mut pid));
-        if fg.is_invalid() || IsZoomed(fg).as_bool() || pid == windows::Win32::System::Threading::GetCurrentProcessId() {
-            return false;
-        }
-        let classe = crate::janelas::classe(fg);
-        if classe == "Progman" || classe == "WorkerW" {
-            return false;
-        }
-        let mut r = RECT::default();
-        _ = GetWindowRect(fg, &mut r);
-        let mut mi = MONITORINFO { cbSize: size_of::<MONITORINFO>() as u32, ..Default::default() };
-        _ = GetMonitorInfoW(MonitorFromWindow(fg, MONITOR_DEFAULTTONEAREST), &mut mi);
-        let m = mi.rcMonitor;
-        r.left <= m.left && r.top <= m.top && r.right >= m.right && r.bottom >= m.bottom
-    }
-}
-
 fn postar(msg: u32, wp: usize) {
     let d = HWND(DESTINO.load(Ordering::Relaxed) as *mut _);
     unsafe { _ = PostMessageW(Some(d), msg, WPARAM(wp), LPARAM(0)) };
@@ -72,14 +48,14 @@ unsafe extern "system" fn gancho(code: i32, wp: WPARAM, lp: LPARAM) -> LRESULT {
         let vk = VIRTUAL_KEY(k.vkCode as u16);
         if !injetada {
             // Ctrl+Win+←/→: no lugar da troca de área de trabalho virtual do Windows
-            if (vk == VK_LEFT || vk == VK_RIGHT) && desce && apertada(VK_CONTROL) && (apertada(VK_LWIN) || apertada(VK_RWIN)) && !tela_cheia_na_frente() {
+            if (vk == VK_LEFT || vk == VK_RIGHT) && desce && apertada(VK_CONTROL) && (apertada(VK_LWIN) || apertada(VK_RWIN)) {
                 postar(WM_GRUPO_VIZINHO, (vk == VK_RIGHT) as usize);
                 return LRESULT(1);
             }
             if vk == VK_TAB && desce && !apertada(VK_CONTROL) {
                 let alt = k.flags.0 & LLKHF_ALTDOWN.0 != 0;
                 let win = apertada(VK_LWIN) || apertada(VK_RWIN);
-                if (alt != win) && !tela_cheia_na_frente() {
+                if alt != win {
                     if alt && ALT_TAB.load(Ordering::Relaxed) {
                         postar(WM_ALT_TAB, apertada(VK_SHIFT) as usize);
                         return LRESULT(1);

@@ -1456,6 +1456,7 @@ unsafe extern "system" fn proc_janela(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM)
 unsafe fn proc_barra(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
     let (msg_shell, msg_barra_criada) = com(|st| (st.msg_shell, st.msg_barra_criada)).unwrap_or((0, 0));
     if msg != 0 && msg == msg_shell {
+        appbar::conferir_tela_cheia(h);
         _ = com(|st| {
             let j = lp.0 as isize;
             match wp.0 {
@@ -1603,6 +1604,7 @@ unsafe fn proc_barra(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
             // janela de outro grupo veio para a frente (barra do Windows, notificação):
             // troca para o grupo dela
             let j = raiz(HWND(wp.0 as *mut _));
+            appbar::conferir_tela_cheia(h);
             _ = com(|st| {
                 atualizar(st);
                 st.piscando.remove(&j);
@@ -1685,6 +1687,7 @@ teclado::WM_GRUPO_VIZINHO => {            teclado::mascarar();            let de
             LRESULT(0)
         }
         WM_TIMER if wp.0 == TIMER => {
+            appbar::conferir_tela_cheia(h);
             _ = com(|st| {
                 if st.esconder_windows {
                     sistema::manter_escondida();
@@ -1701,7 +1704,7 @@ teclado::WM_GRUPO_VIZINHO => {            teclado::mascarar();            let de
         WM_APPBAR => {
             match wp.0 {
                 ABN_POSICAO | ABN_ESTADO => _ = com(posicionar),
-                ABN_TELA_CHEIA => appbar::tela_cheia(h, lp.0 != 0),
+                ABN_TELA_CHEIA => appbar::conferir_tela_cheia(h),
                 _ => {}
             }
             LRESULT(0)

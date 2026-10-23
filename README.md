@@ -23,6 +23,7 @@ Só as janelas do grupo ativo ficam na tela. As dos outros grupos ficam estacion
 - Passar o mouse num botão ou ícone da bandeja mostra o título/dica.
 - Janelas em outras áreas de trabalho virtuais ficam de fora.
 - A barra é uma AppBar: o Windows desconta a faixa dela da área útil.
+- Programa em tela cheia por cima no monitor da barra (vídeo, jogo, F11): a barra fica atrás dele até ele sair de tela cheia ou outra janela vir para a frente.
 
 ## Painéis de rede e volume
 
@@ -41,7 +42,7 @@ Abre com Alt+Tab, Win+Tab ou pelo menu da barra. Mostra todos os grupos ao mesmo
 - Arrastar uma janela para outro cartão muda o grupo dela; para "Novo grupo", cria um grupo com ela.
 - Digitar filtra pelo título; setas andam entre as janelas; Enter abre; Esc fecha.
 - Duplo clique no nome do grupo renomeia.
-- Com janela de programa rodando como administrador em foco, ou jogo/vídeo em tela cheia, o Alt+Tab do Windows continua.
+- Com janela de programa rodando como administrador em foco, o Alt+Tab do Windows continua.
 
 ## Barra do Windows e bandeja
 
