@@ -1310,8 +1310,16 @@ unsafe fn lugar_dos_botoes(dono: HWND, n: i32) -> Option<RECT> {
     let dpi = dpi_de(dono);
     if estendida(dono, &j, c) {
         // no lugar dos botões do DWM, da borda de cima até a altura deles
-        let b = limites_do_dwm(dono, &j)?;
-        let topo = if IsZoomed(dono).as_bool() { b.top } else { b.top.max(j.top + 1) };
+        let mut b = limites_do_dwm(dono, &j)?;
+        // dentro da borda de 1 px da moldura, como na barra de título do Windows: os limites
+        // do DWM vão até a borda visível e cobririam a linha dela
+        let mut f = RECT::default();
+        let zoom = IsZoomed(dono).as_bool();
+        if !zoom && windows::Win32::Graphics::Dwm::DwmGetWindowAttribute(dono, windows::Win32::Graphics::Dwm::DWMWA_EXTENDED_FRAME_BOUNDS, &mut f as *mut _ as *mut _, size_of::<RECT>() as u32).is_ok() {
+            b.right = b.right.min(f.right - 1);
+            b.top = b.top.max(f.top + 1);
+        }
+        let topo = if zoom { b.top } else { b.top.max(j.top + 1) };
         let (mut esquerda, mut base) = (b.right - n * px(CELULA, dpi), b.bottom);
         if let Some(k) = botoes_da_moldura_uwp(dono) {
             let mut f = RECT::default();
