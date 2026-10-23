@@ -8,6 +8,9 @@ use windows::Win32::Foundation::*;
 use windows::Win32::Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_CLOAKED};
 use windows::Win32::Graphics::Gdi::{CreateBitmap, DeleteObject};
 use windows::Win32::System::Threading::{OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION};
+use windows::Win32::System::Com::CoTaskMemFree;
+use windows::Win32::System::Com::StructuredStorage::PropVariantToStringAlloc;
+use windows::Win32::UI::Shell::PropertiesSystem::{IPropertyStore, SHGetPropertyStoreForWindow};
 use windows::Win32::UI::Shell::{IShellItemImageFactory, SHCreateItemFromParsingName, SIIGBF_ICONONLY};
 use windows::Win32::UI::WindowsAndMessaging::*;
 
@@ -99,7 +102,35 @@ thread_local! {
 
 /// Ícone do executável no tamanho pedido, pelo shell (fica nítido em qualquer tamanho).
 fn icone_do_exe(h: HWND, tam: i32) -> Option<HICON> {
-    let caminho = caminho_do_processo(h)?;
+    icone_do_shell(caminho_do_processo(h)?, tam)
+}
+
+/// `PKEY_AppUserModel_ID`.
+const PKEY_AUMID: PROPERTYKEY = PROPERTYKEY { fmtid: windows::core::GUID::from_u128(0x9f4c2855_9f79_4b39_a8d0_e1d42de1d5f3), pid: 5 };
+
+/// ID do app (AppUserModelID) gravado na janela, como a barra do Windows lê.
+fn id_do_app(h: HWND) -> Option<String> {
+    unsafe {
+        let loja: IPropertyStore = SHGetPropertyStoreForWindow(h).ok()?;
+        let v = loja.GetValue(&PKEY_AUMID).ok()?;
+        let p = PropVariantToStringAlloc(&v).ok()?;
+        let id = p.to_string().ok();
+        CoTaskMemFree(Some(p.0 as *const _));
+        id.filter(|s| !s.is_empty())
+    }
+}
+
+/// Moldura dos apps UWP (Configurações, Calculadora…): a janela é do ApplicationFrameHost, e o
+/// ícone do executável seria o dele. O do app sai pelo ID do app, na pasta de aplicativos.
+fn icone_do_app_uwp(h: HWND, tam: i32) -> Option<HICON> {
+    if classe(h) != "ApplicationFrameWindow" {
+        return None;
+    }
+    icone_do_shell(format!("shell:AppsFolder\\{}", id_do_app(h)?), tam)
+}
+
+/// Ícone de um item do shell (arquivo ou app) no tamanho pedido, guardado pelo nome.
+fn icone_do_shell(caminho: String, tam: i32) -> Option<HICON> {
     if let Some(i) = ICONES_EXE.with_borrow(|c| c.get(&caminho).copied()) {
         return Some(i);
     }
@@ -131,7 +162,8 @@ fn icone_da_classe(h: HWND, indice: GET_CLASS_LONG_INDEX) -> Option<HICON> {
 /// Ícone da janela: o que ela mesma informa (navegador com perfil, por exemplo), senão o do
 /// executável. Não é dono do HICON: não destruir.
 pub fn icone(h: HWND, tam: i32) -> HICON {
-    pedir_icone(h, ICON_BIG)
+    icone_do_app_uwp(h, tam)
+        .or_else(|| pedir_icone(h, ICON_BIG))
         .or_else(|| icone_da_classe(h, GCLP_HICON))
         .or_else(|| icone_do_exe(h, tam))
         .or_else(|| pedir_icone(h, ICON_SMALL2))
