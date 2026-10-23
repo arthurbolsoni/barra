@@ -50,6 +50,10 @@ static GET_THEME_SYS_COLOR: Original = AtomicUsize::new(0);
 static GET_THEME_SYS_COLOR_BRUSH: Original = AtomicUsize::new(0);
 static RECTANGLE: Original = AtomicUsize::new(0);
 static SET_BK_COLOR: Original = AtomicUsize::new(0);
+static SET_DC_BRUSH_COLOR: Original = AtomicUsize::new(0);
+static SET_DC_PEN_COLOR: Original = AtomicUsize::new(0);
+static PAT_BLT: Original = AtomicUsize::new(0);
+static FAIXA_COMPOSICAO: Original = AtomicUsize::new(0);
 static DUI_COR: Original = AtomicUsize::new(0);
 static DUI_FUNDO: Original = AtomicUsize::new(0);
 static DUI_TEXTO: Original = AtomicUsize::new(0);
@@ -131,6 +135,13 @@ fn instalar() {
         desviar(user32, PCSTR(c"DefWindowProcA".as_ptr() as _), def_window_proc_a as *const (), &DEF_WINDOW_PROC_A);
         desviar(gdi32, PCSTR(c"Rectangle".as_ptr() as _), rectangle as *const (), &RECTANGLE);
         desviar(gdi32, PCSTR(c"SetBkColor".as_ptr() as _), set_bk_color as *const (), &SET_BK_COLOR);
+        desviar(gdi32, PCSTR(c"SetDCBrushColor".as_ptr() as _), set_dc_brush_color as *const (), &SET_DC_BRUSH_COLOR);
+        desviar(gdi32, PCSTR(c"SetDCPenColor".as_ptr() as _), set_dc_pen_color as *const (), &SET_DC_PEN_COLOR);
+        desviar(gdi32, PCSTR(c"PatBlt".as_ptr() as _), pat_blt as *const (), &PAT_BLT);
+        // antes de qualquer faixa de opções nascer: ela pergunta pela composição ao montar
+        if let Ok(dwm) = LoadLibraryExW(w!("dwmapi.dll"), None, LOAD_LIBRARY_SEARCH_SYSTEM32) {
+            desviar(dwm, PCSTR(c"DwmIsCompositionEnabled".as_ptr() as _), faixa_composicao as *const (), &FAIXA_COMPOSICAO);
+        }
         desviar(ux, PCSTR(c"DrawThemeBackground".as_ptr() as _), draw_theme_background as *const (), &DRAW_THEME_BACKGROUND);
         desviar(ux, PCSTR(c"DrawThemeBackgroundEx".as_ptr() as _), draw_theme_background_ex as *const (), &DRAW_THEME_BACKGROUND_EX);
         desviar(ux, PCSTR(c"DrawThemeTextEx".as_ptr() as _), draw_theme_text_ex as *const (), &DRAW_THEME_TEXT_EX);
@@ -529,8 +540,10 @@ fn papel_do_cinza(c: u32) -> Option<usize> {
         return None;
     }
     match c & 0x00FF_FFFF {
-        0x19_19_19 | 0x1C_1C_1C | 0x20_20_20 => Some(FUNDO),
+        0x13_13_13 | 0x19_19_19 | 0x1C_1C_1C | 0x20_20_20 => Some(FUNDO),
         0x2B_2B_2B | 0x2C_2C_2C => Some(FUNDO_CLARO),
+        // linhas separadoras (painel da esquerda do Explorador)
+        0x38_38_38 => Some(MUDO),
         _ => None,
     }
 }
@@ -553,6 +566,60 @@ type FSetBkColor = unsafe extern "system" fn(HDC, COLORREF) -> COLORREF;
 unsafe extern "system" fn set_bk_color(dc: HDC, c: COLORREF) -> COLORREF {
     let c = if ligado() { papel_do_cinza(c.0).map_or(c, cor) } else { c };
     original::<FSetBkColor>(&SET_BK_COLOR)(dc, c)
+}
+
+/// Pincel e caneta do DC (DC_BRUSH, DC_PEN) num desses cinzas: o separador do painel da
+/// esquerda do Explorador é pintado assim.
+unsafe extern "system" fn set_dc_brush_color(dc: HDC, c: COLORREF) -> COLORREF {
+    let c = if ligado() { papel_do_cinza(c.0).map_or(c, cor) } else { c };
+    original::<FSetBkColor>(&SET_DC_BRUSH_COLOR)(dc, c)
+}
+
+type FPatBlt = unsafe extern "system" fn(HDC, i32, i32, i32, i32, ROP_CODE) -> BOOL;
+
+/// PatBlt com o pincel do DC num desses cinzas (pincel sólido próprio selecionado no DC):
+/// pinta com o pincel do tema no lugar.
+unsafe extern "system" fn pat_blt(dc: HDC, x: i32, y: i32, w: i32, h: i32, rop: ROP_CODE) -> BOOL {
+    let o = original::<FPatBlt>(&PAT_BLT);
+    if ligado() && rop == PATCOPY {
+        let atual = GetCurrentObject(dc, OBJ_BRUSH);
+        if let Some(p) = seguro(None, || papel_do_pincel_cinza(HBRUSH(atual.0))) {
+            let antes = SelectObject(dc, pincel(p).into());
+            let r = o(dc, x, y, w, h, rop);
+            SelectObject(dc, antes);
+            return r;
+        }
+    }
+    o(dc, x, y, w, h, rop)
+}
+
+unsafe extern "system" fn set_dc_pen_color(dc: HDC, c: COLORREF) -> COLORREF {
+    let c = if ligado() { papel_do_cinza(c.0).map_or(c, cor) } else { c };
+    original::<FSetBkColor>(&SET_DC_PEN_COLOR)(dc, c)
+}
+
+/// A faixa de opções pergunta se há composição para decidir se a fileira das abas fica no
+/// vidro do DWM; sem Mica o vidro sai preto. Para ela a resposta é não, e a fileira vem opaca,
+/// com as cores globais. O resto do programa recebe a resposta verdadeira.
+unsafe extern "system" fn faixa_composicao(sim: *mut BOOL) -> HRESULT {
+    let hr = original::<unsafe extern "system" fn(*mut BOOL) -> HRESULT>(&FAIXA_COMPOSICAO)(sim);
+    if hr.is_ok() && !sim.is_null() && ligado() && seguro(false, || chamado_pela_faixa()) {
+        *sim = false.into();
+    }
+    hr
+}
+
+/// O endereço de retorno está no uiribbon.dll.
+fn chamado_pela_faixa() -> bool {
+    let Ok(m) = (unsafe { GetModuleHandleW(w!("uiribbon.dll")) }) else { return false };
+    let inicio = m.0 as usize;
+    let fim = unsafe {
+        let nt = inicio + *((inicio + 0x3C) as *const u32) as usize;
+        inicio + *((nt + 0x50) as *const u32) as usize
+    };
+    let mut quadros = [std::ptr::null_mut(); 3];
+    let n = unsafe { windows::Win32::System::Diagnostics::Debug::RtlCaptureStackBackTrace(1, &mut quadros, None) } as usize;
+    quadros[..n].iter().any(|&q| (inicio..fim).contains(&(q as usize)))
 }
 
 /// FillRect sem o desvio.
