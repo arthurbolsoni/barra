@@ -10,17 +10,20 @@
 //! mesma posição a cada versão da barra.
 
 use std::cell::Cell;
+use std::collections::HashSet;
 use std::os::windows::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use windows::core::{s, w, PCSTR, PCWSTR, PWSTR};
-use windows::Win32::Foundation::{FreeLibrary, LocalFree, HLOCAL, HMODULE, LPARAM, LRESULT, WPARAM};
+use windows::core::{s, w, GUID, HRESULT, PCSTR, PCWSTR, PWSTR};
+use windows::Win32::Foundation::{CloseHandle, FreeLibrary, LocalFree, E_FAIL, ERROR_ALREADY_EXISTS, ERROR_NOT_FOUND, HLOCAL, HMODULE, HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::Security::Authorization::*;
 use windows::Win32::Security::{ACL, DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID, SUB_CONTAINERS_AND_OBJECTS_INHERIT};
 use windows::Win32::Storage::FileSystem::{FILE_GENERIC_EXECUTE, FILE_GENERIC_READ};
 use windows::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryW};
 use windows::Win32::System::SystemInformation::GetLocalTime;
+use windows::Win32::System::Threading::{OpenProcess, QueryFullProcessImageNameW, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION};
 use windows::Win32::UI::WindowsAndMessaging::*;
 
 use crate::tema::Tema;
@@ -41,6 +44,8 @@ struct Dlls {
     gancho: HMODULE,
     /// `definir_tema` da barra_menus.dll.
     definir: DefinirTema,
+    /// Caminho da cópia da barra_menus.dll, terminado em 0.
+    menus: &'static [u16],
 }
 
 thread_local! {
@@ -170,7 +175,7 @@ fn carregar() -> Option<Dlls> {
         let definir: DefinirTema = std::mem::transmute(GetProcAddress(m, s!("definir_tema"))?);
         let apontar: DefinirImplementacao = std::mem::transmute(GetProcAddress(g, s!("definir_implementacao"))?);
         apontar(largo(&menus).as_ptr());
-        Some(Dlls { gancho: g, definir })
+        Some(Dlls { gancho: g, definir, menus: Vec::leak(largo(&menus)) })
     }
 }
 
@@ -286,5 +291,97 @@ pub fn desligar() {
     }
     for h in ganchos.into_iter().flatten() {
         unsafe { _ = UnhookWindowsHookEx(h) };
+    }
+}
+
+/// CLSID do TAP da barra_menus.dll (menus/src/xaml.rs).
+const CLSID_TAP: GUID = GUID::from_u128(0x3a1f9c2e_6b7d_4e58_9a0c_5d2b8e4f7a61);
+
+/// Processos de app com pacote em que a barra já conectou (ou está conectando) o TAP.
+static CONECTADOS: Mutex<Option<HashSet<u32>>> = Mutex::new(None);
+
+/// Shell: o diagnóstico do XAML derruba o Explorer (ver menus/src/xaml.rs).
+const SHELL: &[&str] = &["shellexperiencehost.exe", "startmenuexperiencehost.exe", "searchhost.exe", "textinputhost.exe", "lockapp.exe"];
+
+/// Janela de app com pacote (CoreWindow, como a Configurações) veio para a frente. O Windows
+/// não carrega DLL de gancho global nesses apps, então a barra pede ao XAML do app que carregue
+/// a barra_menus.dll como TAP do XAML Diagnostics. Só com o app na frente: suspenso, ele não
+/// responde e a conexão falha (fica para a próxima vez).
+pub fn em_primeiro_plano(h: HWND) {
+    if ATUAL.get().is_empty() {
+        return;
+    }
+    let Some(Some(d)) = DLLS.get() else { return };
+    let mut classe = [0u16; 64];
+    let n = unsafe { GetClassNameW(h, &mut classe) } as usize;
+    let moldura = match String::from_utf16_lossy(&classe[..n]).as_str() {
+        "Windows.UI.Core.CoreWindow" => false,
+        "ApplicationFrameWindow" => true,
+        _ => return,
+    };
+    let (menus, h) = (d.menus, h.0 as isize);
+    std::thread::spawn(move || {
+        let h = HWND(h as *mut _);
+        // a moldura vem para a frente antes de receber a janela do app
+        let nucleo = if moldura {
+            let achar = || unsafe { FindWindowExW(Some(h), None, w!("Windows.UI.Core.CoreWindow"), None) }.ok();
+            let mut c = achar();
+            for _ in 0..50 {
+                if c.is_some() {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(100));
+                c = achar();
+            }
+            let Some(c) = c else { return };
+            c
+        } else {
+            h
+        };
+        let mut pid = 0;
+        unsafe { GetWindowThreadProcessId(nucleo, Some(&mut pid)) };
+        if pid == 0 || !CONECTADOS.lock().unwrap_or_else(|e| e.into_inner()).get_or_insert_default().insert(pid) {
+            return;
+        }
+        if executavel(pid).is_none_or(|e| SHELL.iter().any(|s| e.ends_with(&format!(r"\{s}")))) {
+            return;
+        }
+        if let Err(hr) = conectar_tap(pid, menus) {
+            CONECTADOS.lock().unwrap_or_else(|e| e.into_inner()).get_or_insert_default().remove(&pid);
+            registrar(&format!("tema no app {pid}: InitializeXamlDiagnosticsEx devolveu {:#010x}", hr.0 as u32));
+        }
+    });
+}
+
+/// Caminho do executável do processo, em minúsculas.
+fn executavel(pid: u32) -> Option<String> {
+    unsafe {
+        let p = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid).ok()?;
+        let mut buf = [0u16; 520];
+        let mut n = buf.len() as u32;
+        let ok = QueryFullProcessImageNameW(p, PROCESS_NAME_WIN32, PWSTR(buf.as_mut_ptr()), &mut n).is_ok();
+        _ = CloseHandle(p);
+        ok.then(|| String::from_utf16_lossy(&buf[..n as usize]).to_lowercase())
+    }
+}
+
+type Ixde = unsafe extern "system" fn(PCWSTR, u32, PCWSTR, PCWSTR, GUID, PCWSTR) -> HRESULT;
+
+/// InitializeXamlDiagnosticsEx do XAML do sistema (UWP), com a barra_menus.dll como TAP. O XAML
+/// só aceita nomes VisualDiagConnectionN e devolve ERROR_NOT_FOUND com o nome já em uso.
+fn conectar_tap(pid: u32, menus: &'static [u16]) -> Result<(), HRESULT> {
+    unsafe {
+        let m = LoadLibraryW(w!("Windows.UI.Xaml.dll")).map_err(|e| e.code())?;
+        let f = GetProcAddress(m, s!("InitializeXamlDiagnosticsEx")).ok_or(E_FAIL)?;
+        let ixde: Ixde = std::mem::transmute(f);
+        let mut hr = E_FAIL;
+        for c in 1..=100 {
+            let ponto: Vec<u16> = format!("VisualDiagConnection{c}\0").encode_utf16().collect();
+            hr = ixde(PCWSTR(ponto.as_ptr()), pid, w!(""), PCWSTR(menus.as_ptr()), CLSID_TAP, PCWSTR::null());
+            if hr != HRESULT::from_win32(ERROR_NOT_FOUND.0) && hr != HRESULT::from_win32(ERROR_ALREADY_EXISTS.0) {
+                break;
+            }
+        }
+        hr.ok().map_err(|_| hr)
     }
 }

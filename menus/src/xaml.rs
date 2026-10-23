@@ -119,6 +119,10 @@ struct Framework {
     /// Propriedades de pincel dos elementos (interface, índice do get na vtable): Foreground,
     /// Background e BorderBrush de TextBlock, ContentPresenter, Control, Panel e Border.
     pinceis_dos_elementos: &'static [(GUID, usize)],
+    /// IBrush, para o put_Background.
+    brush: GUID,
+    /// IBorder: 10 get_Background, 11 put_Background (igual nos dois).
+    border: GUID,
 }
 
 const UWP_TEXTBLOCK: GUID = GUID::from_u128(0xae2d9271_3b4a_45fc_8468_f7949548f4d5);
@@ -147,6 +151,8 @@ const UWP: Framework = Framework {
         (UWP_BORDER, 6),
         (UWP_BORDER, 10),
     ],
+    brush: GUID::from_u128(0x8806a321_1e06_422c_a1cc_01696559e021),
+    border: UWP_BORDER,
 };
 
 const WINUI3: Framework = Framework {
@@ -166,6 +172,8 @@ const WINUI3: Framework = Framework {
         (WINUI3_BORDER, 6),
         (WINUI3_BORDER, 10),
     ],
+    brush: GUID::from_u128(0x2de3cb83_1329_5679_88f8_c822bc5442cb),
+    border: WINUI3_BORDER,
 };
 
 /// Windows.UI.Color.
@@ -318,6 +326,13 @@ struct Linha {
     /// Entradas de dicionário trocadas por um pincel nosso: dicionário, chave e o valor de antes
     /// (handles do XAML Diagnostics).
     trocados: Vec<(u64, u64, u64)>,
+    /// Caminho até a raiz de cada janela do app (handles do XAML Diagnostics): RootScrollViewer
+    /// e o ScrollContentPresenter dele; a raiz é o Border logo abaixo.
+    acima_da_raiz: HashSet<u64>,
+    /// Raízes das janelas.
+    raizes: Vec<u64>,
+    /// Raízes com o fundo do tema e o Background de antes.
+    pintadas: Vec<(IUnknown, Option<IUnknown>)>,
 }
 
 /// Pincel sólido achado num dicionário.
@@ -333,7 +348,20 @@ thread_local! {
 }
 
 fn papel_pela_cor(por_cor: &[(Cor, usize)], c: Cor) -> Option<usize> {
-    por_cor.iter().find(|&&(k, _)| k == c).map(|&(_, p)| p)
+    por_cor.iter().find(|&&(k, _)| k == c).map(|&(_, p)| p).or_else(|| papel_do_cinza(c))
+}
+
+/// Cinzas do modo escuro do Windows em pincéis fora do WinUI: o Gerenciador de Tarefas pinta o
+/// cabeçalho das páginas com um pincel próprio #191919. Só opacos e só no modo escuro.
+fn papel_do_cinza(c: Cor) -> Option<usize> {
+    if c.a != 0xFF || MODO.load(Ordering::Relaxed) != ESCURO || c.r != c.g || c.g != c.b {
+        return None;
+    }
+    match c.r {
+        0x19 | 0x1C | 0x20 => Some(FUNDO),
+        0x2B | 0x2C => Some(FUNDO_CLARO),
+        _ => None,
+    }
 }
 
 /// Nome da chave (as de estilo implícito são tipos, não texto).
@@ -399,6 +427,9 @@ fn aplicar(l: &mut Linha) {
             _ = unsafe { svc.ReplaceResource(dic, chave, antes) };
         }
     }
+    for (borda, antes) in l.pintadas.drain(..) {
+        _ = unsafe { por_background(&borda, antes.as_ref().map_or(null_mut(), |a| a.as_raw())) };
+    }
     l.por_cor.clear();
     l.vistos.clear();
     let modo = MODO.load(Ordering::Relaxed);
@@ -433,6 +464,42 @@ fn aplicar(l: &mut Linha) {
             _ = gravar_cor(p, cor_do_tema(papel));
         }
     }
+    for h in l.raizes.clone() {
+        pintar_raiz(l, h);
+    }
+}
+
+/// Fundo do tema na raiz de uma janela do app. A raiz é transparente, e por trás aparece o Mica
+/// da janela, ou a cor reserva dele (#202020) quando o Mica está desligado, como na moldura da
+/// barra: a Configurações ficava com cartões no tema sobre um fundo cinza.
+fn pintar_raiz(l: &mut Linha, h: u64) {
+    let (Some(diag), Some((_, f))) = (l.diag.as_ref(), l.app.as_ref()) else { return };
+    let Some(svc) = diag.cast::<IVisualTreeService>().ok() else { return };
+    let c = cor_do_tema(FUNDO);
+    let tipo = BSTR::from(f.tipo_pincel);
+    let valor = BSTR::from(format!("#FF{:02X}{:02X}{:02X}", c.r, c.g, c.b));
+    unsafe {
+        let objeto = |h: u64| {
+            let mut p = null_mut();
+            (diag.GetIInspectableFromHandle(h, &mut p).is_ok() && !p.is_null()).then(|| IUnknown::from_raw(p))
+        };
+        let Some(borda) = objeto(h).and_then(|o| como(&o, &f.border)) else { return };
+        let mut novo = 0u64;
+        if svc.CreateInstance(tipo.as_ptr(), valor.as_ptr(), &mut novo).is_err() {
+            return;
+        }
+        let Some(pincel) = objeto(novo).and_then(|o| como(&o, &f.brush)) else { return };
+        let antes = obter(&borda, 10);
+        if por_background(&borda, pincel.as_raw()).is_ok() {
+            l.pintadas.push((borda, antes));
+        }
+    }
+}
+
+/// IBorder::put_Background.
+unsafe fn por_background(borda: &IUnknown, pincel: *mut c_void) -> HRESULT {
+    let put: unsafe extern "system" fn(*mut c_void, *mut c_void) -> HRESULT = std::mem::transmute(metodo(borda, 11));
+    put(borda.as_raw(), pincel)
 }
 
 /// Pincel selado (os do próprio framework recusam o put_Color com E_ACCESSDENIED): troca a
@@ -503,6 +570,12 @@ impl IObjectWithSite_Impl for Tap_Impl {
         let site = site.cloned();
         *self.site.lock().unwrap_or_else(|e| e.into_inner()) = site.clone();
         let Some(site) = site else { return Ok(()) };
+        // a barra também conecta de fora (apps com pacote, onde o gancho não entra): se o gancho
+        // já conectou, ou se é a shell, fica só a primeira
+        if FORA.load(Ordering::Relaxed) || ATIVO.swap(true, Ordering::Relaxed) {
+            return Ok(());
+        }
+        CONECTADO.store(true, Ordering::Relaxed);
         // o AdviseVisualTreeChange chamado daqui trava esperando a linha da interface
         let servico = site.cast::<IVisualTreeService>()?.into_raw() as usize;
         let aviso = self.to_interface::<IVisualTreeServiceCallback>().into_raw() as usize;
@@ -526,10 +599,15 @@ impl IObjectWithSite_Impl for Tap_Impl {
 }
 
 impl IVisualTreeServiceCallback_Impl for Tap_Impl {
-    unsafe fn OnVisualTreeChange(&self, _: ParentChildRelation, elemento: VisualElement, mudanca: i32) -> HRESULT {
+    unsafe fn OnVisualTreeChange(&self, relacao: ParentChildRelation, elemento: VisualElement, mudanca: i32) -> HRESULT {
         if mudanca != ADICIONADO {
             return S_OK;
         }
+        let tipo = if elemento.tipo.is_null() {
+            &[][..]
+        } else {
+            std::slice::from_raw_parts(elemento.tipo, (0..).take_while(|&i| *elemento.tipo.add(i) != 0).count())
+        };
         seguro((), || {
             // reentrada (o ReplaceResource remonta elementos na hora): o elemento fica para depois
             LINHA.with(|linha| {
@@ -548,6 +626,16 @@ impl IVisualTreeServiceCallback_Impl for Tap_Impl {
                 }
                 if l.versao != Some(VERSAO.load(Ordering::Relaxed)) {
                     aplicar(l);
+                }
+                if tipo.ends_with(w!(".RootScrollViewer").as_wide())
+                    || (tipo.ends_with(w!(".ScrollContentPresenter").as_wide()) && l.acima_da_raiz.contains(&relacao.pai))
+                {
+                    l.acima_da_raiz.insert(elemento.handle);
+                } else if tipo.ends_with(w!(".Border").as_wide()) && l.acima_da_raiz.contains(&relacao.pai) {
+                    l.raizes.push(elemento.handle);
+                    if matches!(MODO.load(Ordering::Relaxed), ESCURO | CLARO) {
+                        pintar_raiz(l, elemento.handle);
+                    }
                 }
                 let mut p = null_mut();
                 if let Some(d) = l.diag.clone() {
@@ -581,6 +669,8 @@ const DLLS_XAML: [&str; 2] = ["windows.ui.xaml.dll", "microsoft.internal.framewo
 static CONECTADO: AtomicBool = AtomicBool::new(false);
 /// Tentativa em andamento.
 static TENTANDO: AtomicBool = AtomicBool::new(false);
+/// TAP com o aviso da árvore ligado neste processo.
+static ATIVO: AtomicBool = AtomicBool::new(false);
 
 /// Processos da shell ficam de fora. Com o diagnóstico ligado, o Explorer (a shell e as janelas
 /// do Explorador de Arquivos) caiu pelo CoreMessaging: callback com E_FAIL tratado como falha
@@ -655,6 +745,9 @@ unsafe extern "system" fn carregada(motivo: u32, dados: *const DllCarregada, _: 
     }
     let u = &*(*dados).nome;
     let nome = String::from_utf16_lossy(std::slice::from_raw_parts(u.texto, u.bytes as usize / 2)).to_lowercase();
+    if nome == "dui70.dll" {
+        super::controles::instalar_dui();
+    }
     if let Some(i) = DLLS_XAML.iter().position(|d| *d == nome) {
         entrar(i);
     }
@@ -685,6 +778,9 @@ fn entrar(i: usize) {
                 return;
             }
             let Ok(m) = GetModuleHandleW(&HSTRING::from(DLLS_XAML[i])) else { return };
+            if i == 0 {
+                seguro((), composicao::instalar);
+            }
             let Some(f) = GetProcAddress(m, s!("InitializeXamlDiagnosticsEx")) else { return };
             let ixde: Ixde = std::mem::transmute(f);
             let mut buf = [0u16; 260];
@@ -757,4 +853,123 @@ pub unsafe extern "system" fn DllGetClassObject(clsid: *const GUID, iid: *const 
 #[no_mangle]
 pub extern "system" fn DllCanUnloadNow() -> HRESULT {
     S_FALSE
+}
+
+// ---------- composição ----------
+
+/// Pincéis de cor da composição do XAML do sistema (dcomp.dll). O XAML Diagnostics não avisa os
+/// elementos das ilhas XAML além da primeira: no Gerenciador de Tarefas, o cabeçalho, a busca e
+/// o corpo das páginas são ilhas à parte, com pincéis próprios fora dos dicionários (fundo
+/// #191919, texto branco). Toda cor de pincel do XAML passa pelo CompositionColorBrush na hora
+/// de desenhar; ali os cinzas do modo escuro e o branco viram as cores do tema. As funções não
+/// são exportadas: os endereços saem da vtable de um Compositor e de um pincel criados aqui.
+mod composicao {
+    use std::ffi::c_void;
+    use std::ptr::null_mut;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Once;
+
+    use retour::RawDetour;
+    use windows::core::{s, w, GUID, HRESULT, PCSTR, PCWSTR};
+    use windows::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryExW, LOAD_LIBRARY_SEARCH_SYSTEM32};
+
+    use super::super::{seguro, CORES, ESCURO, FUNDO, FUNDO_CLARO, MODO, TEXTO};
+
+    static PUT_COLOR: AtomicUsize = AtomicUsize::new(0);
+    static COM_COR: AtomicUsize = AtomicUsize::new(0);
+
+    const ICOMPOSITOR: GUID = GUID::from_u128(0xb403ca50_7f8c_4e83_985f_cc45060036d8);
+
+    #[repr(C)]
+    struct Opcoes {
+        tamanho: u32,
+        tipo_linha: i32,
+        apartamento: i32,
+    }
+
+    /// Windows.UI.Color por valor: A, R, G e B do byte de baixo para o de cima.
+    fn trocar(c: u32) -> u32 {
+        if MODO.load(Ordering::Relaxed) != ESCURO {
+            return c;
+        }
+        let (a, r, g, b) = (c & 0xFF, (c >> 8) & 0xFF, (c >> 16) & 0xFF, c >> 24);
+        let papel = match (r, g, b) {
+            (0x19, 0x19, 0x19) | (0x1C, 0x1C, 0x1C) | (0x20, 0x20, 0x20) if a == 0xFF => FUNDO,
+            (0x2B, 0x2B, 0x2B) | (0x2C, 0x2C, 0x2C) if a == 0xFF => FUNDO_CLARO,
+            (0xFF, 0xFF, 0xFF) => TEXTO,
+            _ => return c,
+        };
+        let t = CORES[papel].load(Ordering::Relaxed);
+        a | ((t >> 16) & 0xFF) << 8 | ((t >> 8) & 0xFF) << 16 | (t & 0xFF) << 24
+    }
+
+    unsafe extern "system" fn put_color(pincel: *mut c_void, c: u32) -> HRESULT {
+        let f: unsafe extern "system" fn(*mut c_void, u32) -> HRESULT = std::mem::transmute(PUT_COLOR.load(Ordering::Acquire));
+        f(pincel, seguro(c, || trocar(c)))
+    }
+
+    unsafe extern "system" fn com_cor(compositor: *mut c_void, c: u32, saida: *mut *mut c_void) -> HRESULT {
+        let f: unsafe extern "system" fn(*mut c_void, u32, *mut *mut c_void) -> HRESULT = std::mem::transmute(COM_COR.load(Ordering::Acquire));
+        f(compositor, seguro(c, || trocar(c)), saida)
+    }
+
+    unsafe fn desviar(alvo: usize, novo: *const (), o: &AtomicUsize) {
+        let Ok(d) = RawDetour::new(alvo as *const (), novo) else { return };
+        o.store(d.trampoline() as *const () as usize, Ordering::Release);
+        if d.enable().is_ok() {
+            std::mem::forget(d); // fica até o programa fechar (a DLL está presa)
+        } else {
+            o.store(0, Ordering::Release);
+        }
+    }
+
+    /// Uma vez por processo, numa linha de execução própria (o Compositor precisa de uma fila
+    /// do dispatcher na linha que o cria).
+    pub fn instalar() {
+        static UMA_VEZ: Once = Once::new();
+        UMA_VEZ.call_once(|| unsafe {
+            let simbolo = |dll: PCWSTR, nome: PCSTR| LoadLibraryExW(dll, None, LOAD_LIBRARY_SEARCH_SYSTEM32).ok().and_then(|m| GetProcAddress(m, nome));
+            let (Some(fila), Some(ativar), Some(texto)) = (
+                simbolo(w!("CoreMessaging.dll"), s!("CreateDispatcherQueueController")),
+                simbolo(w!("combase.dll"), s!("RoActivateInstance")),
+                simbolo(w!("combase.dll"), s!("WindowsCreateString")),
+            ) else {
+                return;
+            };
+            let fila: unsafe extern "system" fn(Opcoes, *mut *mut c_void) -> HRESULT = std::mem::transmute(fila);
+            let ativar: unsafe extern "system" fn(*mut c_void, *mut *mut c_void) -> HRESULT = std::mem::transmute(ativar);
+            let texto: unsafe extern "system" fn(PCWSTR, u32, *mut *mut c_void) -> HRESULT = std::mem::transmute(texto);
+            let vt = |o: *mut c_void, i: usize| *(*(o as *const *const usize)).add(i);
+            let liberar = |o: *mut c_void| {
+                let f: unsafe extern "system" fn(*mut c_void) -> u32 = std::mem::transmute(vt(o, 2));
+                f(o);
+            };
+            // fila do dispatcher nesta linha (DQTYPE_THREAD_CURRENT, sem apartamento COM)
+            let mut controlador = null_mut();
+            if fila(Opcoes { tamanho: 12, tipo_linha: 2, apartamento: 0 }, &mut controlador).is_err() {
+                return;
+            }
+            let nome = w!("Windows.UI.Composition.Compositor");
+            let (mut classe, mut objeto) = (null_mut(), null_mut());
+            if texto(nome, nome.len() as u32, &mut classe).is_err() || ativar(classe, &mut objeto).is_err() || objeto.is_null() {
+                return;
+            }
+            let consultar: unsafe extern "system" fn(*mut c_void, *const GUID, *mut *mut c_void) -> HRESULT = std::mem::transmute(vt(objeto, 0));
+            let mut compositor = null_mut();
+            if consultar(objeto, &ICOMPOSITOR, &mut compositor).is_ok() && !compositor.is_null() {
+                // ICompositor: 7 CreateColorBrush, 8 CreateColorBrushWithColor
+                let criar: unsafe extern "system" fn(*mut c_void, *mut *mut c_void) -> HRESULT = std::mem::transmute(vt(compositor, 7));
+                let mut pincel = null_mut();
+                if criar(compositor, &mut pincel).is_ok() && !pincel.is_null() {
+                    // ICompositionColorBrush: 6 get_Color, 7 put_Color
+                    desviar(vt(pincel, 7), put_color as *const (), &PUT_COLOR);
+                    liberar(pincel);
+                }
+                desviar(vt(compositor, 8), com_cor as *const (), &COM_COR);
+                liberar(compositor);
+            }
+            liberar(objeto);
+            liberar(controlador);
+        });
+    }
 }

@@ -29,7 +29,7 @@ use windows::Win32::UI::Controls::{EnableThemeDialogTexture, IsThemeDialogTextur
 use windows::Win32::UI::Shell::{DefSubclassProc, SetWindowSubclass};
 use windows::Win32::UI::WindowsAndMessaging::*;
 
-use crate::{cor, escrever, fonte_de, ligado, modulo, prender, seguro, APAGADO, DESTAQUE, FUNDO, FUNDO_CLARO, MUDO, SELECAO, TEXTO, TEXTO_FORTE, VERMELHO};
+use crate::{cor, escrever, fonte_de, ligado, modulo, prender, seguro, APAGADO, DESTAQUE, ESCURO, FUNDO, FUNDO_CLARO, MODO, MUDO, SELECAO, TEXTO, TEXTO_FORTE, VERMELHO};
 
 // ---------- desvios ----------
 
@@ -49,6 +49,10 @@ static GET_THEME_COLOR: Original = AtomicUsize::new(0);
 static GET_THEME_SYS_COLOR: Original = AtomicUsize::new(0);
 static GET_THEME_SYS_COLOR_BRUSH: Original = AtomicUsize::new(0);
 static RECTANGLE: Original = AtomicUsize::new(0);
+static DUI_COR: Original = AtomicUsize::new(0);
+static DUI_FUNDO: Original = AtomicUsize::new(0);
+static DUI_TEXTO: Original = AtomicUsize::new(0);
+static DUI_BORDA: Original = AtomicUsize::new(0);
 
 type FGetSysColor = unsafe extern "system" fn(i32) -> u32;
 type FGetSysColorBrush = unsafe extern "system" fn(i32) -> HBRUSH;
@@ -130,6 +134,65 @@ fn instalar() {
         desviar(ux, PCSTR(c"GetThemeSysColorBrush".as_ptr() as _), get_theme_sys_color_brush as *const (), &GET_THEME_SYS_COLOR_BRUSH);
         INSTALADOS.store(true, Ordering::Release);
     });
+    instalar_dui();
+}
+
+/// Desvios no DirectUI (DUI70.dll), se ele já está no processo. Chamado também quando ele
+/// carrega depois da DLL (aviso de carga em `xaml`).
+pub(crate) fn instalar_dui() {
+    static UMA_VEZ: Once = Once::new();
+    if excluido() {
+        return;
+    }
+    let Ok(dui) = (unsafe { GetModuleHandleW(w!("dui70.dll")) }) else { return };
+    UMA_VEZ.call_once(|| unsafe {
+        prender();
+        desviar(dui, PCSTR(c"?CreateColor@Value@DirectUI@@SAPEAV12@K@Z".as_ptr() as _), dui_cor as *const (), &DUI_COR);
+        desviar(dui, PCSTR(c"?SetBackgroundColor@Element@DirectUI@@QEAAJK@Z".as_ptr() as _), dui_fundo as *const (), &DUI_FUNDO);
+        desviar(dui, PCSTR(c"?SetForegroundColor@Element@DirectUI@@QEAAJK@Z".as_ptr() as _), dui_texto as *const (), &DUI_TEXTO);
+        desviar(dui, PCSTR(c"?SetBorderColor@Element@DirectUI@@QEAAJK@Z".as_ptr() as _), dui_borda as *const (), &DUI_BORDA);
+    });
+}
+
+// ---------- DirectUI ----------
+
+/// Cor do DirectUI (0xAABBGGRR, os 24 bits de baixo como num COLORREF) no tema. O Gerenciador de
+/// Tarefas monta as páginas no DirectUI com as cores do modo escuro no próprio código e nas
+/// folhas de estilo, sem passar pelo tema do Windows: fundo #191919, texto branco e #CDCDCD,
+/// brancos translúcidos na seleção e nas bordas, #243B86 translúcido no mapa de calor. O alfa
+/// fica; as cores dos gráficos ficam como estão. Só no modo escuro: no claro o branco é fundo.
+fn cor_dui(c: u32) -> u32 {
+    if MODO.load(Ordering::Relaxed) != ESCURO {
+        return c;
+    }
+    let papel = match c & 0x00FF_FFFF {
+        0x19_19_19 if c >> 24 == 0xFF => FUNDO,
+        0xFF_FF_FF => TEXTO,
+        0xCD_CD_CD => APAGADO,
+        0x86_3B_24 => DESTAQUE,
+        _ => return c,
+    };
+    c & 0xFF00_0000 | cor(papel).0
+}
+
+type FCorDui = unsafe extern "system" fn(u32) -> *mut std::ffi::c_void;
+type FCorElemento = unsafe extern "system" fn(*mut std::ffi::c_void, u32) -> HRESULT;
+
+/// `Value::CreateColor`: as cores das folhas de estilo e boa parte das do código.
+unsafe extern "system" fn dui_cor(c: u32) -> *mut std::ffi::c_void {
+    original::<FCorDui>(&DUI_COR)(cor_dui(c))
+}
+
+unsafe extern "system" fn dui_fundo(e: *mut std::ffi::c_void, c: u32) -> HRESULT {
+    original::<FCorElemento>(&DUI_FUNDO)(e, cor_dui(c))
+}
+
+unsafe extern "system" fn dui_texto(e: *mut std::ffi::c_void, c: u32) -> HRESULT {
+    original::<FCorElemento>(&DUI_TEXTO)(e, cor_dui(c))
+}
+
+unsafe extern "system" fn dui_borda(e: *mut std::ffi::c_void, c: u32) -> HRESULT {
+    original::<FCorElemento>(&DUI_BORDA)(e, cor_dui(c))
 }
 
 // ---------- cores do sistema ----------

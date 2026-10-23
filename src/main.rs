@@ -2004,6 +2004,7 @@ unsafe fn proc_barra(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
             // troca para o grupo dela
             let j = raiz(HWND(wp.0 as *mut _));
             appbar::conferir_tela_cheia(h);
+            menus_externos::em_primeiro_plano(HWND(wp.0 as *mut _));
             _ = com(|st| {
                 atualizar(st);
                 st.piscando.remove(&j);
