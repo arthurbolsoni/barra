@@ -13,10 +13,15 @@
 //!   de desenhar os dele; no lugar fica uma janela da própria janela (owned popup), com os
 //!   glifos do tema.
 //!
+//! - controles Win32 (botões, caixas de seleção, abas, listas, campos…) e cores do sistema:
+//!   ver `controles`.
+//!
 //! Menus que o próprio programa desenha (itens owner-draw ou com bitmap de callback, como os do
 //! Explorer) ficam só com o modo escuro. Nada aqui pode entrar em pânico: um pânico dentro de
 //! outro programa derrubaria o programa.
 
+
+mod controles;
 
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
@@ -48,6 +53,11 @@ static MODO: AtomicU32 = AtomicU32::new(PADRAO);
 #[link_section = ".barra"]
 static CORES: [AtomicU32; 9] = [const { AtomicU32::new(0) }; 9];
 
+/// Sobe a cada pedido da barra (tema novo, ligar, desligar): cada linha de execução com janela
+/// refaz as suas quando vê um número diferente.
+#[link_section = ".barra"]
+static VERSAO: AtomicU32 = AtomicU32::new(0);
+
 const FUNDO: usize = 0;
 const FUNDO_CLARO: usize = 1;
 const SELECAO: usize = 2;
@@ -70,6 +80,7 @@ pub unsafe extern "system" fn definir_tema(modo: u32, cores: *const u32) {
         }
     }
     MODO.store(modo, Ordering::Relaxed);
+    VERSAO.fetch_add(1, Ordering::Relaxed);
 }
 
 fn ligado() -> bool {
@@ -129,13 +140,14 @@ fn prender() {
 // ---------- ganchos ----------
 
 /// WH_GETMESSAGE: aplica o modo claro/escuro na primeira mensagem do processo e depois de
-/// cada troca de tema.
+/// cada troca de tema; os controles da linha de execução relêem cores e tema (`controles`).
 ///
 /// A mensagem vazia que a barra manda a todas as janelas ao ligar põe os botões do tema nas
 /// janelas que já estavam abertas.
 #[no_mangle]
 pub extern "system" fn gancho(code: i32, wp: WPARAM, lp: LPARAM) -> LRESULT {
     seguro((), aplicar_modo);
+    seguro((), || controles::sincronizar(VERSAO.load(Ordering::Relaxed)));
     if code >= 0 && lp.0 != 0 && ligado() {
         seguro((), || unsafe {
             let m = &*(lp.0 as *const MSG);
@@ -170,7 +182,8 @@ pub extern "system" fn gancho_retorno(code: i32, wp: WPARAM, lp: LPARAM) -> LRES
     unsafe { CallNextHookEx(None, code, wp, lp) }
 }
 
-/// WH_CBT: janela de menu (#32768) recém-criada ganha a moldura do tema.
+/// WH_CBT: janela de menu (#32768) recém-criada ganha a moldura do tema; diálogo e dica, o
+/// tema dos controles.
 #[no_mangle]
 pub extern "system" fn gancho_cbt(code: i32, wp: WPARAM, lp: LPARAM) -> LRESULT {
     if code == HCBT_CREATEWND as i32 && ligado() {
@@ -180,6 +193,8 @@ pub extern "system" fn gancho_cbt(code: i32, wp: WPARAM, lp: LPARAM) -> LRESULT 
             let cs = &*c.lpcs;
             if cs.lpszClass.0 as usize == 0x8000 {
                 vestir_janela_de_menu(h, cs.hwndParent);
+            } else {
+                controles::criada(h);
             }
         });
     }
