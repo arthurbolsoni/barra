@@ -220,9 +220,10 @@ fn reuniao(b: &Bruto, descricao: &str) -> String {
     }
     for padrao in ["https://meet.google.com/", "https://teams.microsoft.com/", "https://teams.live.com/", "zoom.us/j/"] {
         if let Some(i) = descricao.find(padrao) {
-            let ini = descricao[..i].rfind(|c: char| c.is_whitespace() || c == '<' || c == '(').map(|j| j + 1).unwrap_or(0);
+            // o endereço começa no "http" mais próximo antes do padrão (o do Zoom vem com subdomínio)
+            let Some(ini) = descricao[..i + padrao.len()].rfind("http") else { continue };
             let resto = &descricao[ini..];
-            let fim = resto.find(|c: char| c.is_whitespace() || c == '>' || c == ')' || c == '"').unwrap_or(resto.len());
+            let fim = resto.find(|c: char| c.is_whitespace() || matches!(c, '>' | '<' | ')' | '"' | '\'')).unwrap_or(resto.len());
             return resto[..fim].to_string();
         }
     }

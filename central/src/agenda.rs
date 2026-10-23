@@ -173,7 +173,7 @@ pub fn servico() {
                     }
                 }
             }
-            itens.sort_by(|x, y| x["inicio"].as_str().cmp(&y["inicio"].as_str()));
+            ordenar_sem_repetir(&mut itens);
             if erros.is_empty() {
                 let agora = Local::now().to_rfc3339();
                 gravar(&itens, &descricao, None, Some(&agora));
@@ -220,7 +220,7 @@ pub fn consultar(args: &[String]) {
             }
         }
     }
-    todos.sort_by(|x, y| x["inicio"].as_str().cmp(&y["inicio"].as_str()));
+    ordenar_sem_repetir(&mut todos);
     for mut e in todos {
         if let Some(o) = e.as_object_mut() {
             o.remove("tipo");
@@ -239,4 +239,21 @@ pub fn pedir_saida() {
             _ = CloseHandle(e);
         }
     }
+}
+
+/// Ordena por início e tira o evento que aparece em mais de uma agenda (convite recebido nas
+/// duas contas): fica o da primeira agenda da configuração.
+fn ordenar_sem_repetir(v: &mut Vec<Value>) {
+    v.sort_by(|x, y| x["inicio"].as_str().cmp(&y["inicio"].as_str()));
+    // mesmo horário e mesmo título, ou mesmo horário e mesmo link de reunião
+    let mut vistos = std::collections::HashSet::new();
+    v.retain(|e| {
+        let quando = format!("{}|{}", e["inicio"].as_str().unwrap_or(""), e["fim"].as_str().unwrap_or(""));
+        let titulo = format!("t|{quando}|{}", e["titulo"].as_str().unwrap_or("").to_lowercase());
+        let reuniao = e["reuniao"].as_str().map(|r| r.split('?').next().unwrap_or(r)).filter(|r| !r.is_empty()).map(|r| format!("r|{quando}|{r}"));
+        let novo = !vistos.contains(&titulo) && reuniao.as_ref().is_none_or(|r| !vistos.contains(r));
+        vistos.insert(titulo);
+        vistos.extend(reuniao);
+        novo
+    });
 }
