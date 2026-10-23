@@ -233,8 +233,3 @@ pub fn barra_windows_escondida() -> bool {
 pub fn abrir_uri(uri: PCWSTR) {
     unsafe { ShellExecuteW(None, w!("open"), uri, PCWSTR::null(), PCWSTR::null(), SW_SHOWNORMAL) };
 }
-
-/// Central de notificações com o calendário (o mesmo do Win+N).
-pub fn abrir_notificacoes() {
-    abrir_uri(w!("ms-actioncenter:"));
-}

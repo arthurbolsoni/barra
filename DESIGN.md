@@ -255,7 +255,8 @@ Só ícone, sem título.
 - **Rede:** glifo de 14 px em `texto` numa célula de 28 px: cabo (`f0200`), Wi-Fi (`f05a9`) ou VPN (`f0582`), conforme a placa por onde sai a internet; sem conexão, `f0319` em `texto-apagado`. Dica "{placa}: {IPv4}".
 - **Volume:** glifo de 14 px numa célula de 28 px, pelo nível: `f057f` até 33%, `f0580` até 66%, `f057e` acima; mudo `f0581` em `vermelho`. Dica "Volume: {n}%" ou "Volume: mudo".
 - **Painel aberto:** o ícone fica com fundo `fundo-claro` e glifo em `texto-forte`.
-- **Relógio:** "{Dia da semana} HH:MM" ("Quarta-feira 23:22"), dia com inicial maiúscula e sem vírgula, como o "Friday 12:13" do Omarchy; `texto`, 12 px. Dica com a data por extenso e a semana ISO ("Terça-feira, 21 de outubro de 2026 · semana 43"). Clique abre o calendário; com ele aberto, fundo `fundo-claro` e texto `texto-forte`.
+- **Relógio:** "{Dia da semana} HH:MM" ("Quarta-feira 23:22"), dia com inicial maiúscula e sem vírgula, como o "Friday 12:13" do Omarchy; `texto`, 12 px. Dica com a data por extenso e a semana ISO ("Terça-feira, 21 de outubro de 2026 · semana 43"). Clique abre a central; com ela aberta, fundo `fundo-claro` e texto `texto-forte`.
+- **Aviso ao lado do relógio:** "{compromisso} em {n} min" nos 30 minutos antes do próximo compromisso, em `texto` misturado 30% ao `fundo` (`amarelo` nos últimos 5 minutos), 10 px depois da hora; quadrado de 6 px em `vermelho` quando há execução de hoje com falha ou sessão do Claude aguardando permissão. Os dois entram na área de clique do relógio, que continua centrado.
 
 ### Dica (tooltip)
 - **Corner Style:** reto (0 px).
@@ -275,12 +276,21 @@ Abre colado embaixo da barra, alinhado ao ícone (12 px antes dele) e preso à b
 - **Programa (22 px):** ícone da janela do programa (14 px) ou `f08c6`, nome apagado até 112 px e trilho de 4 px até a borda.
 - **Atalhos:** "Configurações de …" no pé, com linha `selecao` em cima, glifo `f0493` em `texto-escuro` e texto apagado.
 
-### Calendário
-Mesmo painel (300 px, fundo, borda e comportamento), centrado embaixo do relógio. Abre sempre no mês de hoje; a roda do mouse troca de mês (para cima, o anterior).
-- **Mês (32 px):** "Outubro 2026" em negrito `texto-forte`; à direita, setas `f104` e `f105` em células de 26 px alinhadas à coluna do sábado (hover `fundo-claro`, glifo `texto-forte`). Fora do mês de hoje, "hoje" em `destaque` antes das setas.
-- **Dias da semana (26 px):** linha de 1 px `selecao` em cima e iniciais "D S T Q Q S S" com a cor dos rótulos de seção. Semana começa no domingo.
-- **Semanas:** sempre seis linhas de 26 px, para a altura não mudar entre meses; sete colunas iguais entre as margens de 12 px. Dia útil em `texto`, fim de semana apagado, dias dos meses vizinhos em `texto-escuro`. Hoje em negrito `destaque` com linha de 2×16 px em `destaque` embaixo do número. Os dias não são clicáveis.
-- **Pé:** "Notificações" (`f009a`, abre a central de notificações, que antes era o clique no relógio) com linha `selecao` em cima e "Configurações de data e hora", no estilo dos atalhos.
+### Central
+Abre colada embaixo da barra, centrada no relógio: até 1560×800 px, limitada ao monitor. Pega o foco (teclado para filtro e navegação) e fecha quando perde o foco, com Esc ou novo clique no relógio.
+- **Corner Style:** reto (0 px). **Shadow:** nenhuma. **Background:** `fundo`. **Border:** 2 px `destaque` nos lados e embaixo, como os quadros da visão geral; em cima fica a barra.
+- **Cabeçalho (44 px):** dia por extenso em negrito 15 px `texto-forte` ("Sexta-feira, 23 de outubro"), "hoje · semana 43" apagado, setas `f104`/`f105` em células de 26 px, abas "dia" e "semana" (escolhida em negrito `destaque` com linha de 2 px embaixo), filtro em `amarelo` ou "texto para filtrar" em `texto-escuro`, e as fontes à direita: glifo e nome em caixa `selecao` quando ligadas; desligadas, sem caixa, apagadas e riscadas por 1 px `mudo`; com erro, em `amarelo`. Linha de 1 px `selecao` embaixo.
+- **Colunas:** linha do tempo (57,5% do que sobra), pendências e uma coluna fixa de 330 px; separadas por 1 px `selecao`, margem interna de 16 px. Na vista de semana, a semana ocupa as duas primeiras.
+- **Linha do tempo:** horas de 7 às 23 (ampliadas se algum item cai fora) em 11 px `texto-escuro`; grade em `fundo` misturado 55% a `selecao`. Faixa "agenda" (55%) com os compromissos em blocos `fundo-claro` de borda 1 px `mudo` (o que está acontecendo, 2 px `destaque`; o que já passou, texto apagado; sobrepostos dividem a largura), título em negrito e "09:00–10:00 · local" quando cabe. Faixa "rotinas" com uma linha de 20 px por execução: glifo de estado (`f00c` `verde` concluída, `f00d` `vermelho` com falha, `f110` `amarelo` em execução, `f017` `texto-escuro` agendada), hora apagada e título; execuções próximas descem para não se sobrepor. Hora atual: linha de 2 px `destaque` por trás das execuções e a hora em negrito `destaque` na coluna das horas. Compromisso de dia inteiro: bloco de 22 px acima da grade.
+- **Detalhe:** preso no pé da linha do tempo, linha de 2 px `destaque` em cima; título em negrito, estado ou horário à direita, fonte e duração apagadas, texto em poço (`fundo` 25% mais escuro) com quebra de linha e altura pelo texto (até 10 linhas), botões `selecao` (hover `mudo`, texto `texto-forte`).
+- **Semana:** sete colunas com "sex" e o número no cabeçalho (hoje em negrito `destaque` com linha de 2 px), compromissos em blocos de 40 px (hora apagada e título), execuções resumidas ("4 execuções", ou "4 · 1 com falha" em `vermelho`).
+- **Pendências:** quadrado de 12 px com borda apagada (concluída: cheio em `verde`, título riscado em `texto-escuro`, no mesmo lugar); título `texto-forte`; prazo à direita ("atrasado" `vermelho`, "hoje" `amarelo`, "amanhã", "ter 27", "30/10" apagados); segunda linha com glifo da fonte e origem apagadas; terceira linha só com comando, em `destaque`. Hover `fundo-claro` na linha. Sessão aguardando permissão e fonte sem execução hoje entram no topo com `f071`/glifo da fonte em `amarelo`.
+- **Prazos:** rótulo "prazos" e "próximos 60 dias" na cor dos rótulos de seção, linhas de 24 px com glifo da fonte, título `texto` e data relativa.
+- **Mês:** o calendário do mês em células de 26 px (iniciais "D S T Q Q S S", fim de semana apagado, meses vizinhos em `texto-escuro`, hoje em negrito `destaque` com linha de 2×16 px, dia escolhido com borda 1 px `mudo`), marca de 4 px no canto dos dias com itens (apagada; `vermelho` com falha).
+- **Rotinas:** duas linhas de 18 px: glifo do estado da última execução, título e próxima data à direita; fonte e periodicidade apagadas, com o comando em `destaque` à direita quando a fonte oferece.
+- **Sessões do Claude:** pasta da sessão e estado ("em execução há 12 min", "aguarda permissão", "concluída às 11:07").
+- **Fontes:** só as com erro, glifo em `amarelo`, mensagem apagada com quebra de linha e a última sincronização.
+- **Pé (28 px):** linha `selecao` em cima; teclas apagadas e o que fazem em `texto-escuro`.
 
 ### Cards / Containers (cartão de grupo)
 - **Corner Style:** reto (0 px).

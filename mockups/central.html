@@ -1,0 +1,585 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+<meta charset="utf-8">
+<title>barra — central</title>
+<style>
+  :root {
+    --fundo: #1a1b26; --fundo-claro: #24283b; --selecao: #292e42; --mudo: #414868;
+    --texto: #a9b1d6; --apagado: #7e84a1; --escuro: #565f89; --forte: #c0caf5;
+    --destaque: #7aa2f7; --vermelho: #f7768e; --amarelo: #e0af68; --verde: #9ece6a;
+    --mono: "CaskaydiaMono Nerd Font", "CaskaydiaCove Nerd Font", "Cascadia Mono", monospace;
+    --hora: 48px;
+  }
+  * { box-sizing: border-box; }
+  ::selection { background: var(--selecao); color: var(--forte); }
+  body { margin: 0; background: #0d0e14; color: var(--texto); font: 12px/1.5 var(--mono); padding: 24px 32px 64px; }
+  h1 { color: var(--forte); font-size: 15px; margin: 0 0 4px; }
+  .intro { color: var(--apagado); margin: 0 0 20px; max-width: 980px; }
+  .intro kbd, .nota kbd { color: var(--amarelo); font: inherit; }
+  button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
+  button:focus-visible { outline: 2px solid var(--destaque); outline-offset: -2px; }
+
+  /* tela simulada */
+  .tela { position: relative; height: 820px; overflow: hidden; border: 1px solid #2a2d3d; user-select: none;
+    background: radial-gradient(ellipse at 30% 120%, #2b3150 0%, #161825 55%, #0f1019 100%); }
+  .janela-fundo { position: absolute; top: 60px; left: 40px; width: 46%; height: 380px; background: #16161e; border: 1px solid #2a2d3d; opacity: .6; padding: 10px 14px; color: var(--escuro); }
+
+  /* barra */
+  .barra { position: absolute; inset: 0 0 auto 0; height: 26px; background: var(--fundo); display: flex; align-items: stretch; z-index: 5; }
+  .barra > * { display: flex; align-items: center; }
+  .grupo { padding: 0 7px; }
+  .grupo.ativo { color: var(--destaque); font-weight: 700; font-size: 14px; }
+  .grupo.vazio { color: var(--apagado); }
+  .sep { color: var(--mudo); padding: 0 4px; }
+  .jan { width: 28px; justify-content: center; font-size: 15px; }
+  .jan.foco { color: var(--forte); background: var(--selecao); }
+  .espaco { flex: 1; }
+  .sis { width: 28px; justify-content: center; font-size: 14px; }
+  .relogio { position: absolute; left: 50%; transform: translateX(-50%); height: 26px; padding: 0 8px; gap: 0; cursor: pointer; }
+  .relogio:hover, .relogio.aberto { background: var(--fundo-claro); }
+  .relogio.aberto .hora { color: var(--forte); }
+  .aviso { color: var(--apagado); margin-left: 10px; }
+  .aviso.perto { color: var(--amarelo); }
+  .aviso .falha { color: var(--vermelho); margin-left: 8px; }
+
+  /* central */
+  .central { position: absolute; top: 26px; left: 50%; transform: translateX(-50%); width: min(1480px, calc(100% - 24px));
+    height: 760px; background: var(--fundo); border: 2px solid var(--destaque); border-top: 0; z-index: 4;
+    display: grid; grid-template-rows: 44px 1fr 28px; }
+  .central[hidden] { display: none; }
+
+  .topo { display: flex; align-items: center; gap: 22px; padding: 0 16px; border-bottom: 1px solid var(--selecao); }
+  .topo .dia { color: var(--forte); font-weight: 700; font-size: 15px; }
+  .topo .semana { color: var(--apagado); margin-left: -12px; }
+  .nav { display: flex; }
+  .nav button { width: 26px; height: 26px; font-size: 14px; }
+  .nav button:hover { background: var(--fundo-claro); color: var(--forte); }
+  .abas { display: flex; gap: 2px; margin-left: 6px; }
+  .abas button { padding: 0 10px; height: 44px; color: var(--apagado); border-bottom: 2px solid transparent; }
+  .abas button:hover { color: var(--texto); }
+  .abas button.sim { color: var(--destaque); border-bottom-color: var(--destaque); font-weight: 700; }
+  .filtro { flex: 1; color: var(--amarelo); }
+  .filtro:empty::before { content: "digite para filtrar"; color: var(--escuro); }
+  .fontes { display: flex; gap: 4px; }
+  .fontes button { padding: 3px 8px; color: var(--apagado); }
+  .fontes button i { font-style: normal; margin-right: 6px; }
+  .fontes button.sim { color: var(--texto); background: var(--selecao); }
+  .fontes button:not(.sim) { text-decoration: line-through; text-decoration-color: var(--mudo); }
+  .fontes button:hover { color: var(--forte); }
+
+  .corpo { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr) 330px; min-height: 0; }
+  .coluna { min-height: 0; overflow: auto; padding: 12px 16px 16px; border-right: 1px solid var(--selecao); }
+  .coluna:last-child { border-right: 0; }
+  .coluna::-webkit-scrollbar { width: 6px; }
+  .coluna::-webkit-scrollbar-thumb { background: var(--mudo); }
+  h2 { margin: 0 0 8px; font-size: 12px; color: var(--forte); display: flex; justify-content: space-between; }
+  h2 small { font-size: 12px; font-weight: 400; color: var(--apagado); }
+  h3 { margin: 18px 0 6px; padding-top: 10px; border-top: 1px solid var(--selecao); font-size: 12px; font-weight: 400; color: #656b8c; display: flex; justify-content: space-between; }
+  h3 small { font-size: 12px; }
+
+  /* linha do tempo */
+  .tempo { position: relative; display: grid; grid-template-columns: 44px 1fr 1fr; }
+  .cab-faixa { color: #656b8c; padding: 0 0 4px 8px; }
+  .horas { position: relative; }
+  .horas div { height: var(--hora); color: var(--escuro); text-align: right; padding-right: 8px; transform: translateY(-8px); }
+  .faixa { position: relative; border-left: 1px solid var(--selecao); }
+  .faixa .grade { position: absolute; left: 0; right: 0; height: 1px; background: #20222f; }
+  .ev { position: absolute; left: 6px; right: 6px; background: var(--fundo-claro); border: 1px solid var(--mudo); padding: 2px 8px; line-height: 18px; overflow: hidden; cursor: pointer; }
+  .ev:hover { border-color: var(--texto); }
+  .ev.agora { border: 2px solid var(--destaque); }
+  .ev.passou { opacity: .55; }
+  .ev b { display: block; color: var(--forte); font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ev span { color: var(--apagado); }
+  .ev.sel { background: var(--selecao); border-color: var(--forte); }
+  .ro { position: absolute; left: 6px; right: 6px; height: 22px; display: flex; align-items: center; gap: 8px; padding: 0 6px; cursor: pointer; white-space: nowrap; overflow: hidden; }
+  .ro:hover, .ro.sel { background: var(--fundo-claro); }
+  .ro .t { color: var(--apagado); }
+  .ro .n { overflow: hidden; text-overflow: ellipsis; }
+  .ok { color: var(--verde); } .falhou { color: var(--vermelho); } .rodando { color: var(--amarelo); } .agendada { color: var(--escuro); }
+  .agora-linha { position: absolute; left: 44px; right: 0; height: 2px; background: var(--destaque); z-index: 2; pointer-events: none; }
+  .agora-linha::before { content: attr(data-h); position: absolute; left: -44px; top: -8px; width: 40px; text-align: right; color: var(--destaque); font-weight: 700; background: var(--fundo); }
+
+  /* detalhe */
+  .detalhe { position: sticky; bottom: -16px; margin: 14px -16px -16px; border-top: 2px solid var(--destaque); padding: 10px 16px 14px; background: var(--fundo); z-index: 3; }
+  .detalhe[hidden] { display: none; }
+  .detalhe .tit { color: var(--forte); font-weight: 700; display: flex; justify-content: space-between; }
+  .detalhe .meta { color: var(--apagado); margin: 2px 0 8px; }
+  .detalhe pre { margin: 0 0 10px; padding: 8px 10px; background: #16161e; color: var(--texto); font: inherit; white-space: pre-wrap; max-height: 140px; overflow: auto; }
+  .acoes { display: flex; gap: 6px; flex-wrap: wrap; }
+  .acoes button { padding: 3px 10px; background: var(--selecao); color: var(--texto); }
+  .acoes button:hover { background: var(--mudo); color: var(--forte); }
+
+  /* semana */
+  .semana-grade { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 0; border-top: 1px solid var(--selecao); }
+  .sd { border-right: 1px solid var(--selecao); min-height: 560px; padding: 6px 6px 10px; cursor: pointer; }
+  .sd:last-child { border-right: 0; }
+  .sd:hover { background: #1d1e2b; }
+  .sd .cab { display: flex; justify-content: space-between; color: var(--apagado); margin-bottom: 6px; }
+  .sd.hoje .cab { color: var(--destaque); font-weight: 700; }
+  .sd.hoje .cab span:last-child { border-bottom: 2px solid var(--destaque); }
+  .sd .it { padding: 2px 5px; margin-bottom: 4px; overflow-wrap: anywhere; }
+  .sd .it.e { background: var(--fundo-claro); border: 1px solid var(--mudo); color: var(--forte); }
+  .sd .it.e i { font-style: normal; color: var(--apagado); display: block; }
+  .sd .it.r { color: var(--apagado); }
+  .sd .vazio { color: var(--escuro); }
+
+  /* listas */
+  .item { display: grid; grid-template-columns: 22px 1fr auto; gap: 0 6px; padding: 6px 6px; cursor: pointer; }
+  .item:hover { background: var(--fundo-claro); }
+  .caixa { width: 12px; height: 12px; border: 1px solid var(--apagado); margin-top: 3px; }
+  .item.feito .caixa { background: var(--verde); border-color: var(--verde); }
+  .item.feito .tx { color: var(--escuro); text-decoration: line-through; }
+  .item .tx { color: var(--forte); }
+  .item .de { grid-column: 2 / 4; color: var(--apagado); }
+  .item .de i { font-style: normal; margin-right: 8px; }
+  .item .quando { color: var(--apagado); }
+  .item .quando.hoje { color: var(--amarelo); }
+  .item .quando.atraso { color: var(--vermelho); }
+  .item .acao { grid-column: 2 / 4; margin-top: 4px; }
+  .item .acao button { color: var(--destaque); }
+  .item .acao button:hover { text-decoration: underline; text-underline-offset: 3px; }
+  .vazio-lista { color: var(--escuro); padding: 6px; }
+
+  /* mês */
+  .mes-cab { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
+  .mes-cab b { color: var(--forte); }
+  .mes { display: grid; grid-template-columns: repeat(7, 1fr); text-align: center; }
+  .mes .ini { color: #656b8c; padding: 4px 0; border-top: 1px solid var(--selecao); }
+  .mes button { height: 28px; position: relative; color: var(--texto); }
+  .mes button:hover { background: var(--fundo-claro); }
+  .mes button.fds { color: var(--apagado); }
+  .mes button.fora { color: var(--escuro); }
+  .mes button.hoje { color: var(--destaque); font-weight: 700; }
+  .mes button.hoje::after { content: ""; position: absolute; left: 50%; bottom: 3px; width: 16px; height: 2px; margin-left: -8px; background: var(--destaque); }
+  .mes button.sel { outline: 1px solid var(--mudo); outline-offset: -1px; }
+  .mes button .pt { position: absolute; top: 4px; right: 6px; width: 4px; height: 4px; background: var(--apagado); }
+  .mes button .pt.falha { background: var(--vermelho); }
+
+  .rot { display: grid; grid-template-columns: 18px 1fr auto; gap: 0 6px; padding: 5px 4px; cursor: pointer; }
+  .rot:hover { background: var(--fundo-claro); }
+  .rot .n { color: var(--texto); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .rot .q { grid-column: 2 / 4; color: var(--apagado); }
+  .rot .prox { color: var(--apagado); }
+
+  .fonte { display: grid; grid-template-columns: 18px 1fr auto; gap: 6px; padding: 4px; }
+  .fonte .n { color: var(--texto); }
+  .fonte .s { color: var(--apagado); }
+  .fonte .s.on { color: var(--verde); }
+  .fonte button.s { color: var(--destaque); }
+
+  .pe { display: flex; align-items: center; gap: 18px; padding: 0 16px; border-top: 1px solid var(--selecao); color: var(--escuro); }
+  .pe kbd { color: var(--apagado); font: inherit; margin-right: 4px; }
+
+  /* notas */
+  .notas { display: grid; grid-template-columns: 1fr 1fr; gap: 32px; margin-top: 28px; max-width: 1480px; }
+  .nota h2 { font-size: 13px; color: var(--forte); }
+  .nota p, .nota li { color: var(--apagado); }
+  .nota ul { padding-left: 18px; margin: 0; }
+  .nota pre { background: var(--fundo); border: 1px solid #2a2d3d; padding: 12px 14px; color: var(--texto); font: inherit; overflow: auto; margin: 8px 0 0; }
+  .nota pre .k { color: var(--destaque); } .nota pre .s { color: var(--verde); } .nota pre .c { color: var(--escuro); }
+</style>
+</head>
+<body>
+<h1>Central — agenda, rotinas e pendências</h1>
+<p class="intro">Abertura pelo relógio ou por <kbd>Win+C</kbd> (no protótipo, <kbd>c</kbd>). A barra mantém apenas o relógio; ao lado dele, o próximo compromisso aparece nos 30 minutos que o antecedem, e um <span style="color:var(--vermelho)">●</span> indica execução com falha. Cada item gerado por um agente informa a fonte e o horário de origem.</p>
+
+<div class="tela" id="tela">
+  <div class="janela-fundo">~ $ cargo run --release<br><br>claudio · 3 sessões</div>
+  <div class="barra">
+    <div class="grupo ativo">&#xf14fb;</div><div class="grupo">2</div><div class="grupo">3</div><div class="grupo vazio">4</div>
+    <div class="sep">|</div>
+    <div class="jan foco">&#xf120;</div><div class="jan">&#xf120;</div><div class="jan">&#xf120;</div><div class="jan">&#xeaae;</div>
+    <div class="sep">|</div><div class="jan">&#xf120;</div><div class="jan">&#xf1d7;</div>
+    <button class="relogio" id="relogio" aria-expanded="false"><span class="hora" id="hora"></span><span class="aviso" id="aviso"></span></button>
+    <div class="espaco"></div>
+    <div class="sis">&#xf05a9;</div><div class="sis">&#xf057e;</div><div style="width:6px"></div>
+  </div>
+
+  <section class="central" id="central" hidden aria-label="Central">
+    <header class="topo">
+      <span class="dia" id="titulo-dia"></span><span class="semana" id="titulo-semana"></span>
+      <div class="nav"><button id="ant" title="Dia anterior">&#xf104;</button><button id="seg" title="Próximo dia">&#xf105;</button></div>
+      <div class="abas"><button data-vista="dia" class="sim">dia</button><button data-vista="semana">semana</button></div>
+      <span class="filtro" id="filtro"></span>
+      <div class="fontes" id="fontes"></div>
+    </header>
+
+    <div class="corpo">
+      <div class="coluna" id="col-tempo"></div>
+
+      <div class="coluna">
+        <h2>Pendências <small id="qtd-pend"></small></h2>
+        <div id="pendencias"></div>
+        <h3>prazos <small>próximos 60 dias</small></h3>
+        <div id="prazos"></div>
+      </div>
+
+      <div class="coluna">
+        <div class="mes-cab"><b id="mes-nome"></b><div class="nav"><button id="mes-ant">&#xf104;</button><button id="mes-seg">&#xf105;</button></div></div>
+        <div class="mes" id="mes"></div>
+        <h3>rotinas <small id="qtd-rot"></small></h3>
+        <div id="rotinas"></div>
+        <h3>fontes</h3>
+        <div id="lista-fontes"></div>
+      </div>
+    </div>
+
+    <footer class="pe">
+      <span><kbd>←→</kbd>dia ou semana anterior e seguinte</span><span><kbd>tab</kbd>alternar dia e semana</span><span><kbd>home</kbd>hoje</span>
+      <span><kbd>1–3</kbd>fontes</span><span><kbd>texto</kbd>filtrar</span><span><kbd>esc</kbd>fechar</span>
+    </footer>
+  </section>
+</div>
+
+<div class="notas">
+  <div class="nota">
+    <h2>Integração</h2>
+    <p>Cada fonte escreve um arquivo JSON em <code>%LOCALAPPDATA%\barra\central\&lt;fonte&gt;.json</code>; a barra observa a pasta e junta tudo. A skill rotinas do soul e as sessões do Claude só precisam de um passo no fim de cada execução que reescreve o arquivo dele. O Google Agenda é sincronizado por um serviço próprio, que grava agenda.json.</p>
+    <ul>
+      <li><b>evento</b>: bloco com início e fim na faixa "agenda".</li>
+      <li><b>execucao</b>: ponto na faixa "rotinas", com estado (<span class="ok">ok</span>, <span class="falhou">falhou</span>, <span class="rodando">rodando</span>, agendada) e o fim do log.</li>
+      <li><b>pendencia</b>: entra em "Pendências"; com <code>prazo</code>, também em "prazos".</li>
+      <li><b>rotina</b>: o agendamento em si, para a lista de rotinas mostrar a próxima execução.</li>
+    </ul>
+  </div>
+  <div class="nota">
+    <h2>Formato</h2>
+<pre>{
+  <span class="k">"fonte"</span>: <span class="s">"soul"</span>,
+  <span class="k">"atualizado"</span>: <span class="s">"2026-10-23T07:42:10-03:00"</span>,
+  <span class="k">"itens"</span>: [
+    { <span class="k">"tipo"</span>: <span class="s">"execucao"</span>, <span class="k">"id"</span>: <span class="s">"rotinas-diarias/2026-10-23"</span>,
+      <span class="k">"titulo"</span>: <span class="s">"Rotinas diárias"</span>, <span class="k">"inicio"</span>: <span class="s">"2026-10-23T07:30"</span>,
+      <span class="k">"estado"</span>: <span class="s">"ok"</span>, <span class="k">"log"</span>: <span class="s">"3 tarefas concluídas"</span> },
+    { <span class="k">"tipo"</span>: <span class="s">"pendencia"</span>, <span class="k">"id"</span>: <span class="s">"conta-luz"</span>,
+      <span class="k">"titulo"</span>: <span class="s">"Pagar a conta de luz"</span>, <span class="k">"prazo"</span>: <span class="s">"2026-10-30"</span>,
+      <span class="k">"acao"</span>: { <span class="k">"rotulo"</span>: <span class="s">"abrir o site"</span>, <span class="k">"uri"</span>: <span class="s">"https://example.com"</span> } },
+    { <span class="k">"tipo"</span>: <span class="s">"rotina"</span>, <span class="k">"id"</span>: <span class="s">"backup-fotos"</span>,
+      <span class="k">"titulo"</span>: <span class="s">"Backup das fotos"</span>, <span class="k">"quando"</span>: <span class="s">"dias úteis 09:00"</span> }
+  ]
+}
+<span class="c">// pendência marcada como concluída é gravada em acoes.jsonl e aplicada pela fonte na execução seguinte</span></pre>
+  </div>
+</div>
+
+<script>
+// ---------- dados de exemplo (sexta, 23/10/2026, 10:12) ----------
+const AGORA = new Date(2026, 9, 23, 10, 12);
+const FONTES = {
+  agenda: { nome: "agenda", g: "", desc: "Google Agenda", estado: "conectado" },
+  soul:   { nome: "soul",   g: "\u{f02a0}", desc: "soul · D:\\Desktop\\soul", estado: "conectado" },
+  claude: { nome: "claude", g: "\u{f06a9}", desc: "Sessões do Claude Code", estado: "conectado" },
+};
+const ESTADO_G = { ok: "", falhou: "", rodando: "", agendada: "" };
+
+const ev = (d, i, f, titulo, fonte, local = "", nota = "") => ({ tipo: "evento", d, i, f, titulo, fonte, local, nota });
+const ex = (d, i, titulo, fonte, estado, log = "", dur = "") => ({ tipo: "execucao", d, i, titulo, fonte, estado, log, dur });
+
+const ITENS = [
+  // quinta 22
+  ev("2026-10-22", "09:00", "09:15", "Reunião de equipe", "agenda", "Meet"),
+  ev("2026-10-22", "15:00", "16:00", "Revisão de código", "agenda", "Meet"),
+  ex("2026-10-22", "07:30", "Organizar a caixa de entrada", "soul", "ok", "", "11 min"),
+  ex("2026-10-22", "09:00", "Backup das fotos", "soul", "ok", "", "38 min"),
+  // sexta 23 (hoje)
+  ev("2026-10-23", "09:00", "09:15", "Reunião de equipe", "agenda", "Meet", "Pauta: planejamento da semana."),
+  ev("2026-10-23", "10:30", "11:30", "Workshop de design", "agenda", "Meet", "Levar o notebook."),
+  ev("2026-10-23", "14:00", "15:00", "Revisão do protótipo", "agenda", "Sala 2", "Testar o fluxo de cadastro."),
+  ev("2026-10-23", "16:30", "17:00", "Dentista", "agenda"),
+  ev("2026-10-23", "18:30", "19:30", "Academia", "agenda", "Centro"),
+  ex("2026-10-23", "07:30", "Organizar a caixa de entrada", "soul", "ok",
+     "E-mails: nada novo\nNewsletters: arquivadas\nPendências: atualizadas", "12 min"),
+  ex("2026-10-23", "07:45", "Conferir notificações", "soul", "ok", "Nada novo", "9 min"),
+  ex("2026-10-23", "09:00", "Backup das fotos", "soul", "rodando", "copiando para o HD externo\n412 de ~900 arquivos", "1h12 até agora"),
+  ex("2026-10-23", "09:40", "Sessão app: CI da main", "claude", "falhou",
+     "job build\nerror: test failed: parser::datas\n→ 2ª falha seguida desde o commit a1f3e9c", "6 min"),
+  // sábado 24
+  // segunda 26
+  ev("2026-10-26", "09:00", "09:15", "Reunião de equipe", "agenda", "Meet"),
+  ev("2026-10-26", "11:00", "12:00", "Apresentação do projeto", "agenda"),
+  ex("2026-10-26", "07:30", "Rotinas diárias", "soul", "agendada"),
+  ex("2026-10-26", "09:00", "Backup das fotos", "soul", "agendada"),
+  // terça 27
+  ev("2026-10-27", "09:00", "09:15", "Reunião de equipe", "agenda", "Meet"),
+  ev("2026-10-27", "14:00", "14:45", "Corte de cabelo", "agenda"),
+  // quarta 21
+  ev("2026-10-21", "09:00", "09:15", "Reunião de equipe", "agenda", "Meet"),
+  ex("2026-10-21", "09:00", "Backup das fotos", "soul", "falhou", "HD externo não encontrado"),
+];
+
+const PENDENCIAS = [
+  { titulo: "Devolver o livro da biblioteca", fonte: "soul", de: "pendencias.md · prazo de 21/10 vencido", prazo: "2026-10-22", acao: "abrir texto" },
+  { titulo: "Renovar o seguro do carro", fonte: "soul", de: "pendencias.md", prazo: "2026-10-27", acao: "abrir" },
+  { titulo: "Responder o orçamento da reforma", fonte: "soul", de: "pendencias.md", acao: "abrir" },
+  { titulo: "Enviar as fotos da viagem", fonte: "soul", de: "historico.md", acao: "abrir" },
+  { titulo: "CI quebrado na main", fonte: "claude", de: "sessão em app · 09:46 · aguardando permissão", acao: "abrir terminal" },
+];
+const PRAZOS = [
+  { titulo: "Renovar o seguro do carro", fonte: "soul", prazo: "2026-10-27" },
+  { titulo: "Pagar a conta de luz", fonte: "soul", prazo: "2026-10-30" },
+  { titulo: "Revisão do carro", fonte: "soul", prazo: "2026-11-10" },
+  { titulo: "Aniversário de casamento", fonte: "soul", prazo: "2026-11-20" },
+  { titulo: "Renovar o passaporte", fonte: "soul", prazo: "2026-12-13" },
+];
+const ROTINAS = [
+  { titulo: "Backup das fotos", fonte: "soul", quando: "diária", ultima: "rodando", prox: "amanhã" },
+  { titulo: "Organizar a caixa de entrada", fonte: "soul", quando: "diária", ultima: "ok", prox: "amanhã" },
+  { titulo: "Conferir notificações", fonte: "soul", quando: "diária", ultima: "ok", prox: "amanhã" },
+  { titulo: "Pendências", fonte: "soul", quando: "diária", ultima: "ok", prox: "amanhã" },
+  { titulo: "Limpar a pasta de downloads", fonte: "soul", quando: "semanal, domingo", ultima: "ok", prox: "1/11" },
+  { titulo: "Regar as plantas", fonte: "soul", quando: "a cada 3 dias", ultima: "ok", prox: "26/10" },
+  { titulo: "Planejar o mês", fonte: "soul", quando: "mensal, dia 1", ultima: "agendada", prox: "1/11" },
+];
+
+// ---------- estado ----------
+const DIAS = ["domingo", "segunda-feira", "terça-feira", "quarta-feira", "quinta-feira", "sexta-feira", "sábado"];
+const DIAS_C = ["dom", "seg", "ter", "qua", "qui", "sex", "sáb"];
+const MESES = ["janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"];
+const st = {
+  aberta: false, vista: "dia", dia: new Date(AGORA), mes: new Date(AGORA.getFullYear(), AGORA.getMonth(), 1),
+  fontes: new Set(Object.keys(FONTES)), filtro: "", sel: null, feitos: new Set(),
+};
+const $ = (id) => document.getElementById(id);
+const chave = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+const mesmoDia = (a, b) => chave(a) === chave(b);
+const min = (h) => { const [a, b] = h.split(":").map(Number); return a * 60 + b; };
+const hhmm = (d) => `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+const esc = (s) => s.replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]);
+const cap = (s) => s[0].toUpperCase() + s.slice(1);
+function semanaIso(d) {
+  const t = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+  const n = t.getUTCDay() || 7; t.setUTCDate(t.getUTCDate() + 4 - n);
+  return Math.ceil(((t - Date.UTC(t.getUTCFullYear(), 0, 1)) / 864e5 + 1) / 7);
+}
+const visivel = (it) => st.fontes.has(it.fonte) && (!st.filtro || it.titulo.toLowerCase().includes(st.filtro.toLowerCase()));
+const doDia = (d) => ITENS.filter((it) => it.d === chave(d) && visivel(it));
+function quando(prazo) {
+  const p = new Date(prazo + "T00:00"), h = new Date(AGORA.getFullYear(), AGORA.getMonth(), AGORA.getDate());
+  const dd = Math.round((p - h) / 864e5);
+  if (dd < 0) return ["atrasado", "atraso"];
+  if (dd === 0) return ["hoje", "hoje"];
+  if (dd === 1) return ["amanhã", ""];
+  if (dd < 7) return [DIAS_C[p.getDay()] + " " + p.getDate(), ""];
+  return [`${p.getDate()}/${p.getMonth() + 1}`, ""];
+}
+
+// ---------- barra ----------
+function barra() {
+  $("hora").textContent = `${cap(DIAS[AGORA.getDay()])} ${hhmm(AGORA)}`;
+  const agoraM = AGORA.getHours() * 60 + AGORA.getMinutes();
+  const prox = ITENS.filter((i) => i.tipo === "evento" && i.d === chave(AGORA) && min(i.i) > agoraM).sort((a, b) => min(a.i) - min(b.i))[0];
+  const falha = ITENS.some((i) => i.d === chave(AGORA) && i.estado === "falhou");
+  let h = "";
+  if (prox && min(prox.i) - agoraM <= 30) {
+    const m = min(prox.i) - agoraM;
+    h = `${esc(prox.titulo)} em ${m} min`;
+    $("aviso").className = "aviso" + (m <= 5 ? " perto" : "");
+  }
+  if (falha) h += `<span class="falha" title="Execução com falha">●</span>`;
+  $("aviso").innerHTML = h;
+  $("relogio").title = `${cap(DIAS[AGORA.getDay()])}, ${AGORA.getDate()} de ${MESES[AGORA.getMonth()]} de ${AGORA.getFullYear()} · semana ${semanaIso(AGORA)}`;
+}
+
+// ---------- central ----------
+function topo() {
+  const d = st.dia;
+  if (st.vista === "dia") {
+    $("titulo-dia").textContent = `${cap(DIAS[d.getDay()])}, ${d.getDate()} de ${MESES[d.getMonth()]}`;
+    $("titulo-semana").textContent = mesmoDia(d, AGORA) ? `hoje · semana ${semanaIso(d)}` : `semana ${semanaIso(d)}`;
+  } else {
+    const ini = inicioSemana(d), fim = new Date(ini); fim.setDate(fim.getDate() + 6);
+    $("titulo-dia").textContent = `${ini.getDate()} a ${fim.getDate()} de ${MESES[fim.getMonth()]}`;
+    $("titulo-semana").textContent = `semana ${semanaIso(d)}`;
+  }
+  $("ant").title = st.vista === "dia" ? "Dia anterior" : "Semana anterior";
+  $("seg").title = st.vista === "dia" ? "Próximo dia" : "Próxima semana";
+  document.querySelectorAll(".abas button").forEach((b) => b.classList.toggle("sim", b.dataset.vista === st.vista));
+  $("filtro").textContent = st.filtro;
+  $("fontes").innerHTML = Object.entries(FONTES).map(([k, f], i) =>
+    `<button data-fonte="${k}" class="${st.fontes.has(k) ? "sim" : ""}" title="${f.desc} (${i + 1})"><i>${f.g}</i>${f.nome}</button>`).join("");
+}
+
+const H0 = 7, H1 = 23, PX = 48;
+function vistaDia() {
+  const itens = doDia(st.dia);
+  const evs = itens.filter((i) => i.tipo === "evento").sort((a, b) => min(a.i) - min(b.i));
+  const exs = itens.filter((i) => i.tipo === "execucao").sort((a, b) => min(a.i) - min(b.i));
+  const y = (h) => ((min(h) - H0 * 60) / 60) * PX;
+  const ehHoje = mesmoDia(st.dia, AGORA), agoraM = AGORA.getHours() * 60 + AGORA.getMinutes();
+  let horas = "", grade = "";
+  for (let h = H0; h < H1; h++) { horas += `<div>${String(h).padStart(2, "0")}</div>`; grade += `<div class="grade" style="top:${(h - H0) * PX}px"></div>`; }
+  const alt = (H1 - H0) * PX;
+  const evh = evs.map((e) => {
+    const idx = ITENS.indexOf(e), passou = ehHoje && min(e.f) <= agoraM, agora = ehHoje && min(e.i) <= agoraM && agoraM < min(e.f);
+    const h = Math.max(y(e.f) - y(e.i) - 2, 20);
+    return `<div class="ev${passou ? " passou" : ""}${agora ? " agora" : ""}${st.sel === idx ? " sel" : ""}" data-i="${idx}" style="top:${y(e.i) + 1}px;height:${h}px">
+      <b>${esc(e.titulo)}</b>${h > 30 ? `<span>${e.i}–${e.f}${e.local ? " · " + esc(e.local) : ""}</span>` : ""}</div>`;
+  }).join("");
+  // execuções muito próximas descem para não se sobrepor
+  let ult = -99;
+  const exh = exs.map((e) => {
+    const idx = ITENS.indexOf(e); let t = y(e.i) - 11; if (t < ult + 23) t = ult + 23; ult = t;
+    return `<div class="ro${st.sel === idx ? " sel" : ""}" data-i="${idx}" style="top:${t}px" title="${FONTES[e.fonte].desc}">
+      <span class="${e.estado}">${ESTADO_G[e.estado]}</span><span class="t">${e.i}</span><span class="n">${esc(e.titulo)}</span></div>`;
+  }).join("");
+  const linha = ehHoje ? `<div class="agora-linha" data-h="${hhmm(AGORA)}" style="top:${((agoraM - H0 * 60) / 60) * PX + 22}px"></div>` : "";
+  const vazio = !evs.length && !exs.length ? `<p class="vazio-lista">Nenhum item neste dia${st.filtro || st.fontes.size < 3 ? " com os filtros atuais" : ""}.</p>` : "";
+  $("col-tempo").innerHTML = `
+    <h2>${ehHoje ? "Hoje" : cap(DIAS[st.dia.getDay()])} <small>${evs.length} compromissos · ${exs.length} execuções</small></h2>${vazio}
+    <div class="tempo" style="height:${alt + 22}px">
+      <div></div><div class="cab-faixa">agenda</div><div class="cab-faixa">rotinas</div>
+      <div class="horas">${horas}</div>
+      <div class="faixa" style="height:${alt}px">${grade}${evh}</div>
+      <div class="faixa" style="height:${alt}px">${grade}${exh}</div>
+      ${linha}
+    </div>
+    <div class="detalhe" id="detalhe" hidden></div>`;
+  detalhe();
+  if (ehHoje) $("col-tempo").scrollTop = Math.max(0, ((agoraM - H0 * 60) / 60) * PX - 160);
+}
+
+function detalhe() {
+  const box = $("detalhe"); if (!box) return;
+  const it = ITENS[st.sel];
+  if (!it || it.d !== chave(st.dia)) { box.hidden = true; return; }
+  const f = FONTES[it.fonte];
+  if (it.tipo === "evento") {
+    box.innerHTML = `<div class="tit"><span>${esc(it.titulo)}</span><span class="agendada">${it.i}–${it.f}</span></div>
+      <div class="meta">${f.g} ${f.desc}${it.local ? " · " + esc(it.local) : ""}</div>
+      ${it.nota ? `<pre>${esc(it.nota)}</pre>` : ""}
+      <div class="acoes"><button>abrir no Google Agenda</button>${it.local === "Meet" ? "<button>entrar no Meet</button>" : ""}</div>`;
+  } else {
+    const rotulo = { ok: "concluída", falhou: "com falha", rodando: "em execução", agendada: "agendada" }[it.estado];
+    box.innerHTML = `<div class="tit"><span>${esc(it.titulo)}</span><span class="${it.estado}">${ESTADO_G[it.estado]} ${rotulo}</span></div>
+      <div class="meta">${f.g} ${f.desc} · ${it.i}${it.dur ? " · " + it.dur : ""}</div>
+      ${it.log ? `<pre>${esc(it.log)}</pre>` : ""}
+      <div class="acoes">${it.estado !== "agendada" ? "<button>abrir registro</button>" : ""}${it.estado === "falhou" ? "<button>executar novamente</button>" : ""}${it.estado === "agendada" ? "<button>executar agora</button>" : ""}${it.estado === "rodando" ? "<button>interromper</button>" : ""}</div>`;
+  }
+  box.hidden = false;
+}
+
+function inicioSemana(d) { const x = new Date(d); x.setDate(x.getDate() - x.getDay()); return x; }
+function vistaSemana() {
+  const ini = inicioSemana(st.dia);
+  let h = "";
+  for (let k = 0; k < 7; k++) {
+    const d = new Date(ini); d.setDate(d.getDate() + k);
+    const itens = doDia(d).sort((a, b) => min(a.i) - min(b.i));
+    const evs = itens.filter((i) => i.tipo === "evento"), exs = itens.filter((i) => i.tipo === "execucao");
+    const falhas = exs.filter((e) => e.estado === "falhou").length;
+    h += `<div class="sd${mesmoDia(d, AGORA) ? " hoje" : ""}" data-dia="${chave(d)}">
+      <div class="cab"><span>${DIAS_C[d.getDay()]}</span><span>${d.getDate()}</span></div>
+      ${evs.map((e) => `<div class="it e"><i>${e.i}</i>${esc(e.titulo)}</div>`).join("")}
+      ${exs.length ? `<div class="it r"><span class="${falhas ? "falhou" : "agendada"}">${falhas ? ESTADO_G.falhou : ESTADO_G.agendada}</span> ${exs.length} rotina${exs.length > 1 ? "s" : ""}${falhas ? ` · ${falhas} com falha` : ""}</div>` : ""}
+      ${!itens.length ? `<div class="vazio">—</div>` : ""}
+    </div>`;
+  }
+  $("col-tempo").innerHTML = `<h2>Semana <small>selecione um dia para detalhar</small></h2><div class="semana-grade">${h}</div>`;
+}
+
+function listas() {
+  const pend = PENDENCIAS.map((p, i) => ({ ...p, i })).filter(visivel);
+  const abertas = pend.filter((p) => !st.feitos.has(p.i)).length;
+  $("qtd-pend").textContent = abertas ? `${abertas} em aberto` : "";
+  $("pendencias").innerHTML = pend.length ? pend.map((p) => {
+    const [q, c] = p.prazo ? quando(p.prazo) : ["", ""];
+    return `<div class="item${st.feitos.has(p.i) ? " feito" : ""}" data-p="${p.i}">
+      <span class="caixa" role="checkbox" aria-checked="${st.feitos.has(p.i)}"></span><span class="tx">${esc(p.titulo)}</span><span class="quando ${c}">${q}</span>
+      <span class="de"><i>${FONTES[p.fonte].g}</i>${esc(p.de)}</span>
+      ${st.feitos.has(p.i) ? "" : `<span class="acao"><button>${p.acao}</button></span>`}
+    </div>`;
+  }).join("") : `<p class="vazio-lista">Nenhuma pendência.</p>`;
+  const pz = PRAZOS.filter(visivel);
+  $("prazos").innerHTML = pz.length ? pz.map((p) => {
+    const [q, c] = quando(p.prazo);
+    return `<div class="item"><span style="color:var(--apagado)">${FONTES[p.fonte].g}</span><span class="tx" style="color:var(--texto)">${esc(p.titulo)}</span><span class="quando ${c}">${q}</span></div>`;
+  }).join("") : `<p class="vazio-lista">Nenhum prazo.</p>`;
+
+  const rot = ROTINAS.filter(visivel);
+  const falhas = rot.filter((r) => r.ultima === "falhou").length;
+  $("qtd-rot").innerHTML = falhas ? `<span class="falhou">${falhas} com falha</span>` : `${rot.length}`;
+  $("rotinas").innerHTML = rot.map((r) => `<div class="rot" title="${FONTES[r.fonte].desc}">
+      <span class="${r.ultima}">${ESTADO_G[r.ultima]}</span><span class="n">${esc(r.titulo)}</span><span class="prox">${r.prox}</span>
+      <span class="q">${FONTES[r.fonte].g} ${r.fonte} · ${r.quando}</span></div>`).join("");
+  $("lista-fontes").innerHTML = Object.values(FONTES).map((f) => `<div class="fonte"><span style="color:var(--apagado)">${f.g}</span><span class="n">${f.desc}</span>
+      ${f.estado === "conectado" ? `<span class="s on">sincronizada</span>` : `<button class="s">conectar</button>`}</div>`).join("");
+}
+
+function mes() {
+  const m = st.mes;
+  $("mes-nome").textContent = `${cap(MESES[m.getMonth()])} ${m.getFullYear()}`;
+  let h = ["D", "S", "T", "Q", "Q", "S", "S"].map((x) => `<span class="ini">${x}</span>`).join("");
+  const ini = new Date(m); ini.setDate(1 - m.getDay());
+  for (let k = 0; k < 42; k++) {
+    const d = new Date(ini); d.setDate(ini.getDate() + k);
+    const its = ITENS.filter((i) => i.d === chave(d) && st.fontes.has(i.fonte));
+    const c = [d.getMonth() !== m.getMonth() ? "fora" : (d.getDay() % 6 === 0 ? "fds" : ""), mesmoDia(d, AGORA) ? "hoje" : "", mesmoDia(d, st.dia) && st.vista === "dia" ? "sel" : ""].join(" ");
+    const pt = its.length ? `<span class="pt${its.some((i) => i.estado === "falhou") ? " falha" : ""}"></span>` : "";
+    h += `<button class="${c}" data-dia="${chave(d)}">${d.getDate()}${pt}</button>`;
+  }
+  $("mes").innerHTML = h;
+}
+
+function render() {
+  barra();
+  $("central").hidden = !st.aberta;
+  $("relogio").classList.toggle("aberto", st.aberta);
+  $("relogio").setAttribute("aria-expanded", st.aberta);
+  if (!st.aberta) return;
+  topo();
+  st.vista === "dia" ? vistaDia() : vistaSemana();
+  listas();
+  mes();
+}
+
+function irDia(d) { st.dia = d; st.mes = new Date(d.getFullYear(), d.getMonth(), 1); st.sel = null; render(); }
+function passo(n) { const d = new Date(st.dia); d.setDate(d.getDate() + n * (st.vista === "dia" ? 1 : 7)); irDia(d); }
+function abrir(v) { st.aberta = v ?? !st.aberta; if (!st.aberta) { st.filtro = ""; } render(); }
+
+// ---------- eventos ----------
+$("relogio").onclick = () => abrir();
+$("ant").onclick = () => passo(-1);
+$("seg").onclick = () => passo(1);
+$("mes-ant").onclick = () => { st.mes.setMonth(st.mes.getMonth() - 1); mes(); };
+$("mes-seg").onclick = () => { st.mes.setMonth(st.mes.getMonth() + 1); mes(); };
+document.querySelector(".abas").onclick = (e) => { const b = e.target.closest("button"); if (b) { st.vista = b.dataset.vista; render(); } };
+$("fontes").onclick = (e) => {
+  const b = e.target.closest("button"); if (!b) return;
+  const k = b.dataset.fonte; st.fontes.has(k) ? st.fontes.delete(k) : st.fontes.add(k); render();
+};
+$("col-tempo").onclick = (e) => {
+  const sd = e.target.closest(".sd"); if (sd) { st.vista = "dia"; irDia(new Date(sd.dataset.dia + "T00:00")); return; }
+  const it = e.target.closest("[data-i]"); if (!it) return;
+  const i = +it.dataset.i; st.sel = st.sel === i ? null : i; const top = $("col-tempo").scrollTop; render(); $("col-tempo").scrollTop = top;
+};
+$("mes").onclick = (e) => { const b = e.target.closest("button"); if (b) { st.vista = "dia"; irDia(new Date(b.dataset.dia + "T00:00")); } };
+$("pendencias").onclick = (e) => {
+  const it = e.target.closest(".item"); if (!it || e.target.closest(".acao")) return;
+  const i = +it.dataset.p; st.feitos.has(i) ? st.feitos.delete(i) : st.feitos.add(i); listas();
+};
+document.addEventListener("mousedown", (e) => { if (st.aberta && !e.target.closest(".central, .relogio") && e.target.closest(".tela")) abrir(false); });
+document.addEventListener("keydown", (e) => {
+  if (e.ctrlKey || e.altKey || e.metaKey) return;
+  if (!st.aberta) { if (e.key === "c") { abrir(true); e.preventDefault(); } return; }
+  const k = e.key;
+  if (k === "Escape") { if (st.filtro) { st.filtro = ""; render(); } else abrir(false); }
+  else if (k === "ArrowLeft") passo(-1);
+  else if (k === "ArrowRight") passo(1);
+  else if (k === "Backspace") { st.filtro = st.filtro.slice(0, -1); render(); }
+  else if (!st.filtro && /^[1-3]$/.test(k)) { const f = Object.keys(FONTES)[+k - 1]; st.fontes.has(f) ? st.fontes.delete(f) : st.fontes.add(f); render(); }
+  else if (k === "Home") { st.vista = "dia"; irDia(new Date(AGORA)); }
+  else if (k === "Tab") { st.vista = st.vista === "dia" ? "semana" : "dia"; render(); }
+  else if (k.length === 1 && (st.filtro || /[a-zà-ú]/i.test(k)) ) { st.filtro += k; render(); }
+  else return;
+  e.preventDefault();
+});
+
+// #semana abre na semana; #falha abre com a execução que falhou selecionada
+st.aberta = true;
+if (location.hash === "#semana") st.vista = "semana";
+if (location.hash === "#falha") st.sel = ITENS.findIndex((i) => i.estado === "falhou" && i.d === chave(AGORA));
+render();
+</script>
+</body>
+</html>

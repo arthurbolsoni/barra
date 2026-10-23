@@ -14,7 +14,7 @@ Só as janelas do grupo ativo ficam na tela. As dos outros grupos ficam estacion
 | Ícone da bandeja | repassa o clique ao programa (duplo clique também) | menu do programa | |
 | Rede | painel de rede e Bluetooth | | |
 | Volume | painel de volume | | sobe/desce 2% (clique do meio: mudo) |
-| Relógio | notificações e calendário (Win+N) | | |
+| Relógio | central (agenda, rotinas, pendências); também Win+C | | |
 | Espaço vazio | | visão geral, tema, tema nas janelas dos outros programas, tema nas cores do Windows, esconder a barra do Windows, Alt+Tab abre a visão geral, iniciar com o Windows, juntar tudo num grupo, sair | |
 
 - Janela nova entra no grupo ativo. Ao abrir a barra, tudo o que está aberto vai para o grupo 1.
@@ -43,6 +43,61 @@ Abre com Alt+Tab, Win+Tab ou pelo menu da barra. Mostra todos os grupos ao mesmo
 - Digitar filtra pelo título; setas andam entre as janelas; Enter abre; Esc fecha.
 - Duplo clique no nome do grupo renomeia.
 - Com janela de programa rodando como administrador em foco, o Alt+Tab do Windows continua.
+
+## Central
+
+Abre pelo relógio ou com Win+C, embaixo do relógio. Reúne agenda, rotinas, pendências e prazos de várias fontes; fecha com Esc, novo clique no relógio ou clique fora.
+
+- Dia: linha do tempo com os compromissos à esquerda e as execuções das rotinas à direita, com a hora atual em destaque. Clique num item abre o detalhe no pé da coluna (descrição ou resumo da execução, registro, executar de novo, entrar na reunião).
+- Semana: domingo a sábado, com os compromissos e o resumo das execuções de cada dia; clique num dia abre o dia.
+- Pendências: o quadrado marca como concluída; o resto da linha abre o arquivo ou endereço da pendência. Fonte que oferece comando e não rodou hoje aparece como pendência, com o botão para executar. Sessão do Claude aguardando permissão também.
+- Prazos dos próximos 60 dias; mês com marca nos dias que têm itens (vermelha com execução com falha); rotinas com a última execução e a próxima; sessões do Claude em andamento ou concluídas na última meia hora; fontes com erro.
+- Teclas: ←→ dia (semana, na vista de semana), Tab alterna dia e semana, Home volta para hoje, 1–9 liga e desliga cada fonte, texto filtra pelo título, Esc limpa o filtro ou fecha.
+- Na barra, ao lado do relógio: o próximo compromisso nos 30 minutos que o antecedem (amarelo nos últimos 5) e um quadrado vermelho quando há execução de hoje com falha ou sessão do Claude aguardando permissão.
+
+### Fontes
+
+Cada fonte grava `%LOCALAPPDATA%\barra\central\<fonte>.json`; a barra relê a pasta quando algum arquivo muda.
+
+| Fonte | Quem grava |
+| --- | --- |
+| `agenda` | `barra-central`, a partir do Google Agenda |
+| `soul` | skill `rotinas` do soul (`D:\Desktop\soul`), no começo e no fim de cada execução |
+| `agentes` | `barra-central`, a partir das tarefas e execuções do claude-hooks (`~/.claude-hooks`) |
+| `claude` | hooks do Claude Code, um arquivo por sessão em `central\claude\` |
+
+Formato de `<fonte>.json`:
+
+```json
+{
+  "versao": 1,
+  "fonte": "soul",
+  "descricao": "soul · D:\Desktop\soul",
+  "atualizado": "2026-10-23T10:30:00-03:00",
+  "erro": "texto, quando a última leitura falhou (opcional)",
+  "executar": { "rotulo": "executar as rotinas", "pasta": "D:\Desktop\soul", "comando": "claude \"/rotinas\"" },
+  "itens": [
+    { "tipo": "evento", "id": "…", "titulo": "…", "inicio": "2026-10-23T09:00", "fim": "2026-10-23T09:15", "local": "…", "descricao": "…", "link": "…", "reuniao": "…" },
+    { "tipo": "execucao", "id": "…", "titulo": "…", "inicio": "2026-10-23T07:30", "fim": "…", "estado": "ok | falha | executando | agendada", "resumo": "…", "registro": "caminho ou endereço", "executar": { "…": "…" } },
+    { "tipo": "pendencia", "id": "…", "titulo": "…", "origem": "…", "prazo": "2026-10-30", "link": "caminho ou endereço", "executar": { "…": "…" } },
+    { "tipo": "prazo", "id": "…", "titulo": "…", "data": "2026-11-20", "link": "…" },
+    { "tipo": "rotina", "id": "…", "titulo": "…", "quando": "diária", "ultima": { "data": "2026-10-23", "estado": "ok" }, "proxima": "2026-10-24", "executar": { "…": "…" } }
+  ]
+}
+```
+
+- Datas: `AAAA-MM-DD` (dia inteiro), `AAAA-MM-DDTHH:MM` no horário local ou ISO 8601 com fuso. Campos fora `tipo`, `titulo` e as datas obrigatórias de cada tipo são opcionais.
+- `executar` abre o comando num Windows Terminal novo, na `pasta`, sem elevação (pelo Explorer, mesmo com a barra rodando como administrador).
+- Pendência marcada na central vai para `central\acoes.jsonl`, uma linha por ação: `{"quando", "fonte", "id", "titulo", "acao": "concluir" | "reabrir"}`. A fonte aplica no registro dela e apaga as linhas que já aplicou; até lá, a barra mostra a pendência riscada.
+
+### Serviço `barra-central`
+
+A barra copia `barra-central.exe` para `%LOCALAPPDATA%\barra\bin` e abre o serviço ao iniciar (sem janela, uma instância só). Quando o executável compilado muda, a barra encerra o serviço, troca a cópia e abre de novo.
+
+- Agenda: conta de serviço do Google (a mesma do soul, `%USERPROFILE%\.soul-google\sa.json`), escopo de leitura. A agenda precisa estar compartilhada com o e-mail da conta de serviço. Sincroniza a cada 5 minutos, de 14 dias atrás a 60 dias à frente, e também quando a central abre e a última sincronização tem mais de um minuto. Configuração em `%LOCALAPPDATA%\barra\agenda-config.json`: `{ "chave": "<sa.json>", "agendas": ["<id da agenda>"], "intervalo_min": 5 }`. Com erro, os eventos da última sincronização continuam e o erro aparece em "fontes".
+- Agentes: relê o claude-hooks a cada 30 segundos. Tarefa vira rotina (com `claude-hooks run <tarefa>`), execução dos últimos 14 dias vira execução, e a execução mais recente de cada tarefa que terminou com `acao_necessaria` vira pendência. Sem `~/.claude-hooks`, a fonte não aparece.
+- `barra-central hook`: chamado pelos hooks do Claude Code (`SessionStart`, `UserPromptSubmit`, `Notification`, `PostToolUse`, `Stop`, `SessionEnd` em `~/.claude/settings.json`) com o evento no stdin. Estados: `trabalhando`, `permissao`, `concluida`; `SessionEnd` apaga o arquivo da sessão.
+- `barra-central sair` encerra o serviço; `barra-central agentes` lê o claude-hooks uma vez. Registro em `%LOCALAPPDATA%\barra\central.log`.
 
 ## Barra do Windows e bandeja
 
@@ -85,6 +140,6 @@ Ao sair, a barra do Windows volta como estava (estado guardado em `HKCU\Software
 cargo build --release
 ```
 
-Gera `barra.exe`, `barra_menus.dll` e `barra_gancho.dll` em `target\release`; as DLLs ficam ao lado do exe.
+Gera `barra.exe`, `barra_menus.dll`, `barra_gancho.dll` e `barra-central.exe` em `target\release`; as DLLs e o serviço ficam ao lado do exe.
 
 `barra --preview <arquivo.bmp>` desenha uma barra de exemplo em BMP, sem abrir nada na tela.

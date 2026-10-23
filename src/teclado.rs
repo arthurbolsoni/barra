@@ -16,6 +16,8 @@ pub const WM_ALT_SOLTO: u32 = WM_APP + 22;
 pub const WM_ESC_ALT: u32 = WM_APP + 23;
 /// Ctrl+Win+←/→: grupo anterior/seguinte (wparam 1 = seguinte).
 pub const WM_GRUPO_VIZINHO: u32 = WM_APP + 24;
+/// Win+C: abre ou fecha a central.
+pub const WM_CENTRAL: u32 = WM_APP + 25;
 
 /// Para onde postar.
 pub static DESTINO: AtomicIsize = AtomicIsize::new(0);
@@ -28,6 +30,9 @@ pub static VISAO: AtomicIsize = AtomicIsize::new(0);
 /// Painel de rede ou volume aberto (ele não pega o foco): o Esc vai para ele.
 pub static PAINEL_ABERTO: AtomicBool = AtomicBool::new(false);
 pub static PAINEL: AtomicIsize = AtomicIsize::new(0);
+/// Central aberta: como na visão geral, as teclas vão para ela mesmo sem o foco.
+pub static CENTRAL_ABERTA: AtomicBool = AtomicBool::new(false);
+pub static CENTRAL: AtomicIsize = AtomicIsize::new(0);
 /// Só para teste (BARRA_TESTE=1): aceita teclas simuladas por SendInput.
 static ACEITA_SIMULADA: AtomicBool = AtomicBool::new(false);
 
@@ -52,6 +57,11 @@ unsafe extern "system" fn gancho(code: i32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                 postar(WM_GRUPO_VIZINHO, (vk == VK_RIGHT) as usize);
                 return LRESULT(1);
             }
+            // Win+C: central (no lugar do atalho do Copilot)
+            if vk == VIRTUAL_KEY(0x43) && desce && (apertada(VK_LWIN) || apertada(VK_RWIN)) && !apertada(VK_CONTROL) && k.flags.0 & LLKHF_ALTDOWN.0 == 0 {
+                postar(WM_CENTRAL, 0);
+                return LRESULT(1);
+            }
             if vk == VK_TAB && desce && !apertada(VK_CONTROL) {
                 let alt = k.flags.0 & LLKHF_ALTDOWN.0 != 0;
                 let win = apertada(VK_LWIN) || apertada(VK_RWIN);
@@ -74,6 +84,10 @@ unsafe extern "system" fn gancho(code: i32, wp: WPARAM, lp: LPARAM) -> LRESULT {
             // direto para ela, senão o Enter e os números cairiam na janela que estava na frente
             let visao = HWND(VISAO.load(Ordering::Relaxed) as *mut _);
             if VISAO_ABERTA.load(Ordering::Relaxed) && desce && GetForegroundWindow() != visao && encaminhar(visao, vk, k.scanCode) {
+                return LRESULT(1);
+            }
+            let central = HWND(CENTRAL.load(Ordering::Relaxed) as *mut _);
+            if CENTRAL_ABERTA.load(Ordering::Relaxed) && desce && GetForegroundWindow() != central && encaminhar(central, vk, k.scanCode) {
                 return LRESULT(1);
             }
             if PAINEL_ABERTO.load(Ordering::Relaxed) && vk == VK_ESCAPE && desce {
@@ -167,14 +181,14 @@ pub fn forcar_primeiro_plano(h: HWND) {
     }
 }
 
-/// Repassa uma tecla para a visão geral: teclas de comando como WM_KEYDOWN, o resto como o
+/// Repassa uma tecla para a visão geral ou para a central: teclas de comando como WM_KEYDOWN, o resto como o
 /// caractere que ela digita no layout atual (filtro, 1–9, +, -). Alt, Win, Ctrl e Shift
 /// sozinhos passam direto.
 unsafe fn encaminhar(visao: HWND, vk: VIRTUAL_KEY, scan: u32) -> bool {
     if matches!(vk, VK_MENU | VK_LMENU | VK_RMENU | VK_LWIN | VK_RWIN | VK_CONTROL | VK_LCONTROL | VK_RCONTROL | VK_SHIFT | VK_LSHIFT | VK_RSHIFT) {
         return false;
     }
-    if matches!(vk, VK_ESCAPE | VK_RETURN | VK_TAB | VK_LEFT | VK_RIGHT | VK_UP | VK_DOWN | VK_BACK | VK_DELETE | VK_F2) {
+    if matches!(vk, VK_ESCAPE | VK_RETURN | VK_TAB | VK_LEFT | VK_RIGHT | VK_UP | VK_DOWN | VK_BACK | VK_DELETE | VK_F2 | VK_HOME) {
         _ = PostMessageW(Some(visao), WM_KEYDOWN, WPARAM(vk.0 as usize), LPARAM(0));
         return true;
     }

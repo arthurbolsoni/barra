@@ -3,6 +3,7 @@
 mod appbar;
 mod audio;
 mod bluetooth;
+mod central;
 mod bandeja;
 mod cores_do_windows;
 mod desenho;
@@ -107,6 +108,7 @@ struct Estado {
     audio: Option<audio::Audio>,
     /// Glifo da rede, se tem conexão, e a dica.
     rede: (&'static str, bool, String),
+    central: central::Central,
 }
 
 thread_local! {
@@ -118,6 +120,7 @@ static BARRA: AtomicIsize = AtomicIsize::new(0);
 static VISAO: AtomicIsize = AtomicIsize::new(0);
 static DICA: AtomicIsize = AtomicIsize::new(0);
 static PAINEL: AtomicIsize = AtomicIsize::new(0);
+static CENTRAL: AtomicIsize = AtomicIsize::new(0);
 
 /// Acesso ao estado. Devolve None se ele já está em uso (mensagem que chegou no meio de
 /// outra operação, enquanto o Windows espera outra janela responder).
@@ -221,6 +224,7 @@ fn cena(st: &mut Estado, w: i32, h: i32) -> Cena {
         })
         .collect();
     let t = unsafe { GetLocalTime() };
+    let agora = chrono::Local::now().naive_local();
     Cena {
         w,
         h,
@@ -232,11 +236,16 @@ fn cena(st: &mut Estado, w: i32, h: i32) -> Cena {
         bandeja: bandeja::visiveis().into_iter().map(|(indice, icone, _, dono)| ItemBandeja { indice, icone, glifo: janelas::glifo(hwnd(dono)) }).collect(),
         rede: (st.rede.0, st.rede.1),
         volume: st.audio.as_ref().and_then(|a| a.nivel()),
-        aberto: st.painel.tipo.map(|t| match t {
-            painel::Tipo::Volume => Alvo::Volume,
-            painel::Tipo::Rede => Alvo::Rede,
-            painel::Tipo::Calendario => Alvo::Relogio,
-        }),
+        aberto: if st.central.aberta {
+            Some(Alvo::Relogio)
+        } else {
+            st.painel.tipo.map(|t| match t {
+                painel::Tipo::Volume => Alvo::Volume,
+                painel::Tipo::Rede => Alvo::Rede,
+            })
+        },
+        aviso: st.central.proximo(agora).map(|(t, m)| (format!("{t} em {m} min"), m <= 5)),
+        alerta: st.central.alerta(agora.date()),
     }
 }
 
@@ -303,7 +312,7 @@ fn clicar(alvo: Alvo) {
         Alvo::Bandeja(i) => bandeja::clicar(i, bandeja::Botao::Esquerdo, cursor()),
         Alvo::Rede => abrir_painel(painel::Tipo::Rede),
         Alvo::Volume => abrir_painel(painel::Tipo::Volume),
-        Alvo::Relogio => abrir_painel(painel::Tipo::Calendario),
+        Alvo::Relogio => alternar_central(),
     }
 }
 
@@ -311,13 +320,13 @@ fn clicar(alvo: Alvo) {
 
 fn mostrar_dica(st: &mut Estado) {
     // com o painel aberto a dica cobriria ele
-    let hover = st.hover.filter(|_| st.painel.tipo.is_none());
+    let hover = st.hover.filter(|_| st.painel.tipo.is_none() && !st.central.aberta);
     let texto = match hover {
         Some(Alvo::Bandeja(i)) => bandeja::visiveis().into_iter().find(|(n, _, _, _)| *n == i).map(|(_, _, d, _)| d).unwrap_or_default(),
         Some(Alvo::Janela(h)) => janelas::titulo(hwnd(h)),
         Some(Alvo::Relogio) => {
             let t = unsafe { GetLocalTime() };
-            let semana = painel::semana_iso(t.wYear as i32, t.wMonth as u32, t.wDay as u32);
+            let semana = central::semana_iso(chrono::Local::now().date_naive());
             format!("{}, {} de {} de {} · semana {semana}", DIAS[t.wDayOfWeek as usize % 7], t.wDay, MESES[(t.wMonth as usize + 11) % 12], t.wYear)
         }
         Some(Alvo::Rede) => st.rede.2.clone(),
@@ -514,27 +523,19 @@ fn abrir_painel(tipo: painel::Tipo) {
         let alvo = match tipo {
             painel::Tipo::Volume => Alvo::Volume,
             painel::Tipo::Rede => Alvo::Rede,
-            painel::Tipo::Calendario => Alvo::Relogio,
         };
         let r = st.alvos.iter().find(|(_, a)| *a == alvo).map(|(r, _)| *r)?;
         st.painel.tipo = Some(tipo);
         st.painel.hover = None;
         st.painel.arrasto = None;
         st.painel.ticks = 0;
-        st.painel.ir_para_hoje();
         renovar_painel(st);
         let mut b = RECT::default();
         unsafe { _ = GetWindowRect(st.barra, &mut b) };
         let m = appbar::monitor();
         let w = (painel::LARGURA * st.escala).round() as i32;
         let h = desenho::altura_painel(&st.painel.linhas(st.audio.as_ref()), st.escala);
-        // o calendário fica centrado embaixo do relógio; rede e volume, alinhados ao ícone
-        let x = if tipo == painel::Tipo::Calendario {
-            b.left + ((r.left + r.right) / 2.0) as i32 - w / 2
-        } else {
-            b.left + r.left as i32 - (12.0 * st.escala) as i32
-        }
-        .clamp(m.left, m.right - w);
+        let x = (b.left + r.left as i32 - (12.0 * st.escala) as i32).clamp(m.left, m.right - w);
         unsafe {
             _ = SetWindowPos(st.painel.hwnd, Some(HWND_TOPMOST), x, b.bottom, w, h, SWP_SHOWWINDOW | SWP_NOACTIVATE);
             _ = ShowWindow(st.dica, SW_HIDE);
@@ -600,14 +601,6 @@ fn clicar_painel(st: &mut Estado, alvo: AlvoPainel, x: i32) {
         AlvoPainel::Link(i) => {
             fechar_painel(st);
             abrir_link(i);
-            return;
-        }
-        AlvoPainel::MesAnterior => st.painel.mudar_mes(-1),
-        AlvoPainel::MesSeguinte => st.painel.mudar_mes(1),
-        AlvoPainel::Hoje => st.painel.ir_para_hoje(),
-        AlvoPainel::Notificacoes => {
-            fechar_painel(st);
-            sistema::abrir_notificacoes();
             return;
         }
     }
@@ -685,12 +678,6 @@ unsafe fn proc_painel(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
             _ = ScreenToClient(h, &mut pt);
             let delta = ((wp.0 >> 16) & 0xFFFF) as i16;
             _ = com(|st| {
-                // no calendário a roda troca de mês (para cima, o anterior)
-                if st.painel.tipo == Some(painel::Tipo::Calendario) {
-                    st.painel.mudar_mes(if delta > 0 { -1 } else { 1 });
-                    invalidar(h);
-                    return;
-                }
                 let alvo = match alvo_painel_em(&st.painel.alvos, pt.x, pt.y) {
                     Some(a @ AlvoPainel::Programa(_)) => a,
                     _ => AlvoPainel::Nivel,
@@ -707,12 +694,12 @@ unsafe fn proc_painel(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
             LRESULT(0)
         }
         WM_CLIQUE_FORA => {
-            // no ícone de rede/volume ou no relógio quem decide é o clique na barra (fecha ou troca de painel)
+            // no ícone de rede/volume quem decide é o clique na barra (fecha ou troca de painel)
             let (x, y) = xy(lp);
             _ = com(|st| {
                 let mut b = RECT::default();
                 _ = GetWindowRect(st.barra, &mut b);
-                let no_icone = matches!(alvo_em(&st.alvos, x - b.left, y - b.top), Some(Alvo::Rede | Alvo::Volume | Alvo::Relogio));
+                let no_icone = matches!(alvo_em(&st.alvos, x - b.left, y - b.top), Some(Alvo::Rede | Alvo::Volume));
                 if !(no_icone && PtInRect(&b, POINT { x, y }).as_bool()) {
                     fechar_painel(st);
                 }
@@ -734,6 +721,331 @@ unsafe fn proc_painel(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
         }
         _ => DefWindowProcW(h, msg, wp, lp),
     }
+}
+
+// ---------- central ----------
+
+/// Pede ao serviço uma sincronização da agenda, se a última tem mais de um minuto.
+fn pedir_sincronizacao(st: &Estado) {
+    let agora = chrono::Local::now().naive_local();
+    let velha = st.central.dados.fontes.iter().find(|f| f.nome == "agenda").and_then(|f| f.atualizado).is_none_or(|a| agora - a > chrono::Duration::minutes(1));
+    if !velha {
+        return;
+    }
+    use windows::Win32::System::Threading::{OpenEventW, SetEvent, EVENT_MODIFY_STATE};
+    unsafe {
+        if let Ok(e) = OpenEventW(EVENT_MODIFY_STATE, false, w!("Local\\barra-central-sincronizar")) {
+            _ = SetEvent(e);
+            _ = CloseHandle(e);
+        }
+    }
+}
+
+fn abrir_central() {
+    let Some(Some(h)) = com(|st| {
+        if st.central.aberta {
+            return None;
+        }
+        fechar_painel(st);
+        st.central.dados.recarregar();
+        pedir_sincronizacao(st);
+        let hoje = chrono::Local::now().date_naive();
+        st.central.aberta = true;
+        st.central.vista = central::Vista::Dia;
+        st.central.ir_dia(hoje);
+        st.central.filtro.clear();
+        st.central.hover = None;
+        st.central.anterior = primeiro_plano();
+        let s = st.escala;
+        let m = appbar::monitor();
+        let mut b = RECT::default();
+        unsafe { _ = GetWindowRect(st.barra, &mut b) };
+        let w = ((1560.0 * s) as i32).min(m.right - m.left - (24.0 * s) as i32);
+        let h = ((800.0 * s) as i32).min(m.bottom - b.bottom - (16.0 * s) as i32);
+        // centrada embaixo do relógio
+        let centro = st.alvos.iter().find(|(_, a)| *a == Alvo::Relogio).map(|(r, _)| b.left + ((r.left + r.right) / 2.0) as i32).unwrap_or((m.left + m.right) / 2);
+        let x = (centro - w / 2).clamp(m.left, m.right - w);
+        unsafe {
+            _ = SetWindowPos(st.central.hwnd, Some(HWND_TOPMOST), x, b.bottom, w, h, SWP_SHOWWINDOW);
+            _ = ShowWindow(st.dica, SW_HIDE);
+        }
+        st.dica_texto.clear();
+        redesenhar(st);
+        Some(st.central.hwnd)
+    }) else {
+        return;
+    };
+    teclado::CENTRAL_ABERTA.store(true, Ordering::Relaxed);
+    unsafe { _ = UpdateWindow(h) };
+    forcar_primeiro_plano(h);
+}
+
+/// Fecha a central; `voltar` devolve o foco para a janela de antes (Esc).
+fn fechar_central(voltar: bool) {
+    teclado::CENTRAL_ABERTA.store(false, Ordering::Relaxed);
+    let Some(Some(anterior)) = com(|st| {
+        if !st.central.aberta {
+            return None;
+        }
+        st.central.aberta = false;
+        st.central.hover = None;
+        unsafe { _ = ShowWindow(st.central.hwnd, SW_HIDE) };
+        redesenhar(st);
+        Some(st.central.anterior)
+    }) else {
+        return;
+    };
+    if voltar && anterior != 0 {
+        forcar_primeiro_plano(hwnd(anterior));
+    }
+}
+
+fn alternar_central() {
+    if com(|st| st.central.aberta) == Some(true) {
+        fechar_central(true);
+    } else {
+        abrir_central();
+    }
+}
+
+fn abrir_endereco(u: &str) {
+    let w: Vec<u16> = u.encode_utf16().chain([0]).collect();
+    sistema::abrir_uri(PCWSTR(w.as_ptr()));
+}
+
+/// Clique na central. Link e comando fecham a central antes (o foco vai para outro programa).
+fn clicar_central(a: central::AlvoCentral) {
+    use central::{AlvoCentral as A, Sel};
+    enum Depois {
+        Nada,
+        Abrir(String),
+        Executar(central::Executar),
+    }
+    let depois = com(|st| {
+        let c = &mut st.central;
+        let d = &c.dados;
+        let r = match a {
+            A::Anterior => {
+                c.passo(-1);
+                Depois::Nada
+            }
+            A::Seguinte => {
+                c.passo(1);
+                Depois::Nada
+            }
+            A::Vista(v) => {
+                c.vista = v;
+                c.sel = None;
+                Depois::Nada
+            }
+            A::Fonte(i) => {
+                c.alternar_fonte(i);
+                Depois::Nada
+            }
+            A::Evento(i) => {
+                c.sel = if c.sel == Some(Sel::Evento(i)) { None } else { Some(Sel::Evento(i)) };
+                Depois::Nada
+            }
+            A::Execucao(i) => {
+                c.sel = if c.sel == Some(Sel::Execucao(i)) { None } else { Some(Sel::Execucao(i)) };
+                Depois::Nada
+            }
+            A::Acao(id) => match c.sel {
+                Some(Sel::Evento(i)) => d.eventos.get(i).map(|e| Depois::Abrir(if id == 1 { e.reuniao.clone() } else { e.link.clone() })).unwrap_or(Depois::Nada),
+                Some(Sel::Execucao(i)) => match d.execucoes.get(i) {
+                    Some(e) if id == 0 => Depois::Abrir(e.registro.clone()),
+                    Some(e) => e.executar.clone().or_else(|| d.fontes.get(e.fonte).and_then(|f| f.executar.clone())).map(Depois::Executar).unwrap_or(Depois::Nada),
+                    None => Depois::Nada,
+                },
+                None => Depois::Nada,
+            },
+            A::FecharDetalhe => Depois::Nada,
+            A::Pendencia(i) => {
+                c.dados.alternar(i);
+                Depois::Nada
+            }
+            A::LinkPendencia(i) => d.pendencias.get(i).map(|p| Depois::Abrir(p.link.clone())).unwrap_or(Depois::Nada),
+            A::ExecutarPendencia(i) => d.pendencias.get(i).and_then(|p| p.executar.clone()).map(Depois::Executar).unwrap_or(Depois::Nada),
+            A::ExecutarFonte(i) => d.fontes.get(i).and_then(|f| f.executar.clone()).map(Depois::Executar).unwrap_or(Depois::Nada),
+            A::Prazo(i) => d.prazos.get(i).map(|p| Depois::Abrir(p.link.clone())).unwrap_or(Depois::Nada),
+            A::Rotina(i) => d.rotinas.get(i).and_then(|r| r.executar.clone()).map(Depois::Executar).unwrap_or(Depois::Nada),
+            A::MesAnterior | A::MesSeguinte => {
+                let m = c.mes;
+                c.mes = if a == A::MesAnterior { m - chrono::Months::new(1) } else { m + chrono::Months::new(1) };
+                Depois::Nada
+            }
+            A::Dia(dd) => {
+                c.vista = central::Vista::Dia;
+                c.ir_dia(dd);
+                Depois::Nada
+            }
+        };
+        invalidar(c.hwnd);
+        redesenhar(st);
+        r
+    })
+    .unwrap_or(Depois::Nada);
+    match depois {
+        Depois::Abrir(u) if !u.is_empty() => {
+            fechar_central(false);
+            abrir_endereco(&u);
+        }
+        Depois::Executar(e) => {
+            fechar_central(false);
+            central::executar(&e);
+        }
+        _ => {}
+    }
+}
+
+unsafe fn proc_central(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
+    match msg {
+        WM_PAINT => {
+            let mut ps = PAINTSTRUCT::default();
+            let dc = BeginPaint(h, &mut ps);
+            let mut r = RECT::default();
+            _ = GetClientRect(h, &mut r);
+            _ = com(|st| {
+                let cena = desenho::CenaCentral { w: r.right, h: r.bottom, escala: st.escala, c: &st.central, agora: chrono::Local::now().naive_local() };
+                if let Ok(a) = st.gfx.desenhar_central(dc, &cena) {
+                    st.central.alvos = a;
+                }
+            });
+            _ = EndPaint(h, &ps);
+            LRESULT(0)
+        }
+        WM_ERASEBKGND => LRESULT(1),
+        WM_MOUSEMOVE => {
+            let (x, y) = xy(lp);
+            _ = com(|st| {
+                let a = st.central.alvo_em(x as f32, y as f32);
+                if a != st.central.hover {
+                    st.central.hover = a;
+                    invalidar(h);
+                }
+            });
+            let mut t = TRACKMOUSEEVENT { cbSize: size_of::<TRACKMOUSEEVENT>() as u32, dwFlags: TME_LEAVE, hwndTrack: h, dwHoverTime: 0 };
+            _ = TrackMouseEvent(&mut t);
+            LRESULT(0)
+        }
+        WM_MOUSELEAVE => {
+            _ = com(|st| {
+                st.central.hover = None;
+                invalidar(h);
+            });
+            LRESULT(0)
+        }
+        WM_LBUTTONUP => {
+            let (x, y) = xy(lp);
+            if let Some(Some(a)) = com(|st| st.central.alvo_em(x as f32, y as f32)) {
+                clicar_central(a);
+            }
+            LRESULT(0)
+        }
+        WM_MOUSEWHEEL => {
+            let delta = ((wp.0 >> 16) & 0xFFFF) as i16;
+            _ = com(|st| {
+                st.central.passo(if delta > 0 { -1 } else { 1 });
+                invalidar(h);
+            });
+            LRESULT(0)
+        }
+        WM_KEYDOWN | WM_SYSKEYDOWN => {
+            let vk = VIRTUAL_KEY(wp.0 as u16);
+            if vk == VK_ESCAPE {
+                let limpou = com(|st| {
+                    let tinha = !st.central.filtro.is_empty();
+                    st.central.filtro.clear();
+                    tinha
+                });
+                if limpou == Some(true) {
+                    invalidar(h);
+                } else {
+                    fechar_central(true);
+                }
+                return LRESULT(0);
+            }
+            _ = com(|st| {
+                let c = &mut st.central;
+                match vk {
+                    VK_LEFT => c.passo(-1),
+                    VK_RIGHT => c.passo(1),
+                    VK_TAB => {
+                        c.vista = if c.vista == central::Vista::Dia { central::Vista::Semana } else { central::Vista::Dia };
+                        c.sel = None;
+                    }
+                    VK_HOME => {
+                        c.vista = central::Vista::Dia;
+                        c.ir_dia(chrono::Local::now().date_naive());
+                    }
+                    VK_BACK => _ = c.filtro.pop(),
+                    _ => return,
+                }
+                invalidar(h);
+            });
+            LRESULT(0)
+        }
+        WM_CHAR => {
+            let Some(ch) = char::from_u32(wp.0 as u32).filter(|ch| !ch.is_control() && (*ch as u32) < 0xE000) else {
+                return LRESULT(0);
+            };
+            _ = com(|st| {
+                let c = &mut st.central;
+                if c.filtro.is_empty() {
+                    if ch.is_whitespace() {
+                        return;
+                    }
+                    // sem filtro, 1–9 liga e desliga a fonte
+                    if let Some(n) = ch.to_digit(10).filter(|n| *n >= 1) {
+                        c.alternar_fonte(n as usize - 1);
+                        invalidar(h);
+                        return;
+                    }
+                }
+                c.filtro.push(ch);
+                invalidar(h);
+            });
+            LRESULT(0)
+        }
+        WM_ACTIVATE => {
+            if (wp.0 & 0xFFFF) as u32 == WA_INACTIVE {
+                fechar_central(false);
+            }
+            DefWindowProcW(h, msg, wp, lp)
+        }
+        _ => DefWindowProcW(h, msg, wp, lp),
+    }
+}
+
+/// Abre o serviço da central (agenda e hooks do Claude). Roda de uma cópia em
+/// `%LOCALAPPDATA%\barra\bin`: assim o `cargo build` troca o executável sem esbarrar no
+/// serviço em execução, e os hooks do Claude apontam sempre para o mesmo caminho.
+fn iniciar_servico() {
+    std::thread::spawn(|| {
+        use std::os::windows::process::CommandExt;
+        const SEM_JANELA: u32 = 0x0800_0000;
+        let Some(base) = central::pasta().parent().map(|p| p.to_path_buf()) else { return };
+        let instalado = base.join("bin").join("barra-central.exe");
+        let origem = std::env::current_exe().ok().and_then(|e| e.parent().map(|d| d.join("barra-central.exe"))).filter(|o| o.exists());
+        if let Some(o) = origem {
+            let marca = |p: &std::path::Path| std::fs::metadata(p).ok().map(|m| (m.len(), m.modified().ok()));
+            if marca(&o) != marca(&instalado) {
+                if instalado.exists() {
+                    _ = std::process::Command::new(&instalado).arg("sair").creation_flags(SEM_JANELA).status();
+                }
+                _ = std::fs::create_dir_all(base.join("bin"));
+                for _ in 0..30 {
+                    if std::fs::copy(&o, &instalado).is_ok() {
+                        break;
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(200));
+                }
+            }
+        }
+        if instalado.exists() {
+            _ = std::process::Command::new(&instalado).creation_flags(SEM_JANELA).spawn();
+        }
+    });
 }
 
 // ---------- visão geral ----------
@@ -1457,6 +1769,8 @@ unsafe extern "system" fn proc_janela(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM)
         proc_visao(h, msg, wp, lp)
     } else if h.0 as isize == PAINEL.load(Ordering::Relaxed) {
         proc_painel(h, msg, wp, lp)
+    } else if h.0 as isize == CENTRAL.load(Ordering::Relaxed) {
+        proc_central(h, msg, wp, lp)
     } else if h.0 as isize == DICA.load(Ordering::Relaxed) && msg == WM_PAINT {
         let mut ps = PAINTSTRUCT::default();
         let dc = BeginPaint(h, &mut ps);
@@ -1694,8 +2008,16 @@ teclado::WM_GRUPO_VIZINHO => {            teclado::mascarar();            let de
                 }
                 renovar_rede(st);
                 renovar_painel(st);
+                if st.central.dados.recarregar() && st.central.aberta {
+                    invalidar(st.central.hwnd);
+                }
                 atualizar(st);
             });
+            LRESULT(0)
+        }
+        teclado::WM_CENTRAL => {
+            teclado::mascarar();
+            alternar_central();
             LRESULT(0)
         }
         WM_APPBAR => {
@@ -2058,10 +2380,13 @@ fn main() -> Result<()> {
         let dica = criar(WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_NOACTIVATE | WS_EX_TRANSPARENT, w!("barra-dica"))?;
         let visao_hwnd = criar(WS_EX_TOOLWINDOW | WS_EX_TOPMOST, w!("barra-visao"))?;
         let painel_hwnd = criar(WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_NOACTIVATE, w!("barra-painel"))?;
+        let central_hwnd = criar(WS_EX_TOOLWINDOW | WS_EX_TOPMOST, w!("barra-central"))?;
         {
             use windows::Win32::Graphics::Dwm::*;
             let canto = DWMWCP_DONOTROUND.0 as u32;
-            _ = DwmSetWindowAttribute(painel_hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, &canto as *const _ as *const _, 4);
+            for j in [painel_hwnd, central_hwnd] {
+                _ = DwmSetWindowAttribute(j, DWMWA_WINDOW_CORNER_PREFERENCE, &canto as *const _ as *const _, 4);
+            }
         }
         BARRA.store(barra.0 as isize, Ordering::Relaxed);
         VISAO.store(visao_hwnd.0 as isize, Ordering::Relaxed);
@@ -2069,6 +2394,8 @@ fn main() -> Result<()> {
         DICA.store(dica.0 as isize, Ordering::Relaxed);
         PAINEL.store(painel_hwnd.0 as isize, Ordering::Relaxed);
         teclado::PAINEL.store(painel_hwnd.0 as isize, Ordering::Relaxed);
+        CENTRAL.store(central_hwnd.0 as isize, Ordering::Relaxed);
+        teclado::CENTRAL.store(central_hwnd.0 as isize, Ordering::Relaxed);
 
         let atuais = janelas::listar();
         let mut grupos = grupos::Grupos::new();
@@ -2099,8 +2426,11 @@ fn main() -> Result<()> {
                 painel: painel::Painel { hwnd: painel_hwnd, ..Default::default() },
                 audio: audio::Audio::new(),
                 rede: (rede::G_SEM_REDE, false, String::new()),
+                central: central::Central { hwnd: central_hwnd, ..Default::default() },
             })
         });
+        _ = com(|st| st.central.dados.recarregar());
+        iniciar_servico();
         _ = com(renovar_rede);
 
         if esconder {
@@ -2176,6 +2506,8 @@ fn preview(saida: &str) -> Result<()> {
         rede: (rede::G_CABO, true),
         volume: Some((0.45, false)),
         aberto: None,
+        aviso: None,
+        alerta: false,
     };
     unsafe {
         let dc = CreateCompatibleDC(None);

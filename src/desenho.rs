@@ -17,6 +17,9 @@ use windows::Win32::UI::WindowsAndMessaging::HICON;
 
 use crate::tema::Tema;
 
+mod central;
+pub use central::CenaCentral;
+
 const FONTE: PCWSTR = w!("CaskaydiaMono Nerd Font");
 
 // glifos da Nerd Font
@@ -29,8 +32,6 @@ pub const G_TECLADO: &str = "\u{f11c}";
 const G_GRUPO_ATIVO: &str = "\u{f14fb}";
 const G_MARCA: &str = "\u{f00c}";
 const G_SETA: &str = "\u{f105}";
-const G_SETA_ESQ: &str = "\u{f104}";
-const INICIAIS: [&str; 7] = ["D", "S", "T", "Q", "Q", "S", "S"];
 
 /// Item do menu de contexto, como o Windows pede para desenhar.
 pub struct ItemMenu<'a> {
@@ -100,8 +101,12 @@ pub struct Cena {
     pub rede: (&'static str, bool),
     /// (nível 0..1, mudo); None sem saída de som.
     pub volume: Option<(f32, bool)>,
-    /// Rede ou volume com o painel aberto.
+    /// Rede ou volume com o painel aberto, ou o relógio com a central aberta.
     pub aberto: Option<Alvo>,
+    /// Compromisso que começa em até 30 minutos: (texto, se faltam 5 minutos ou menos).
+    pub aviso: Option<(String, bool)>,
+    /// Execução de hoje com falha ou sessão do Claude aguardando permissão.
+    pub alerta: bool,
 }
 
 /// O que fica embaixo do cursor no painel de rede ou de volume.
@@ -114,25 +119,6 @@ pub enum AlvoPainel {
     Radio,
     Bluetooth(usize),
     Link(usize),
-    MesAnterior,
-    MesSeguinte,
-    Hoje,
-    Notificacoes,
-}
-
-#[derive(Clone, Copy, PartialEq)]
-pub enum TipoDia {
-    /// Do mês anterior ou do seguinte.
-    Fora,
-    Util,
-    FimDeSemana,
-    Hoje,
-}
-
-#[derive(Clone, Copy)]
-pub struct Dia {
-    pub n: u32,
-    pub tipo: TipoDia,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -153,11 +139,6 @@ pub enum LinhaPainel {
     Rotulo { texto: String, chave: Option<bool> },
     Item { glifo: &'static str, texto: String, dir: String, tom: Tom, marcado: bool, sel: bool, alvo: Option<AlvoPainel>, separado: bool },
     Programa { icone: HICON, nome: String, nivel: f32, mudo: bool, alvo: AlvoPainel },
-    /// Mês do calendário e as setas; `fora` quando não é o mês de hoje (mostra "hoje").
-    Mes { texto: String, fora: bool },
-    /// Iniciais dos dias da semana, com linha em cima.
-    DiasSemana,
-    Semana([Dia; 7]),
     Espaco(f32),
 }
 
@@ -173,9 +154,7 @@ pub type AlvosPainel = Vec<(D2D_RECT_F, AlvoPainel)>;
 impl LinhaPainel {
     fn altura(&self) -> f32 {
         match self {
-            LinhaPainel::Titulo { .. } | LinhaPainel::Nivel { .. } | LinhaPainel::Mes { .. } => 32.0,
-            LinhaPainel::DiasSemana => 26.0,
-            LinhaPainel::Semana(_) => 26.0,
+            LinhaPainel::Titulo { .. } | LinhaPainel::Nivel { .. } => 32.0,
             LinhaPainel::Rotulo { chave: Some(_), .. } => 30.0,
             LinhaPainel::Rotulo { .. } => 26.0,
             LinhaPainel::Item { .. } => 26.0,
@@ -571,14 +550,30 @@ impl Gfx {
         }
 
         // centro: dia e hora (some se as janelas chegarem até ele)
+        // o relógio fica no centro; aviso e alerta vêm depois dele, dentro da mesma área de clique
         let lh = self.largura(&c.hora, &f_texto)? + 16.0 * s;
-        let rh = ret(w / 2.0 - lh / 2.0, 0.0, w / 2.0 + lh / 2.0, h);
+        let la = match &c.aviso {
+            Some((a, _)) => self.largura(a, &f_texto)? + 10.0 * s,
+            None => 0.0,
+        };
+        let lal = if c.alerta { 16.0 * s } else { 0.0 };
+        let rh = ret(w / 2.0 - lh / 2.0, 0.0, w / 2.0 + lh / 2.0 + la + lal, h);
         if rh.left > fim_esquerda && rh.right < xb {
             let aberto = c.aberto == Some(Alvo::Relogio);
             if aberto || hover(Alvo::Relogio) {
                 self.preencher(rh, realce)?;
             }
-            self.texto(&c.hora, &f_texto, rh, cor(if aberto { t.texto_forte } else { t.texto }, 1.0))?;
+            let rr = ret(rh.left, 0.0, rh.left + lh, h);
+            self.texto(&c.hora, &f_texto, rr, cor(if aberto { t.texto_forte } else { t.texto }, 1.0))?;
+            if let Some((a, perto)) = &c.aviso {
+                let tinta = if *perto { t.amarelo } else { mistura(t.texto, t.fundo, 0.3) };
+                self.texto(a, &f_texto, ret(rr.right + 2.0 * s, 0.0, rr.right + la, h), cor(tinta, 1.0))?;
+            }
+            if c.alerta {
+                let x = rh.right - lal + 4.0 * s;
+                let q = 6.0 * s;
+                self.preencher(ret(x, meio - q / 2.0, x + q, meio + q / 2.0), cor(t.vermelho, 1.0))?;
+            }
             alvos.push((rh, Alvo::Relogio));
         }
         Ok(alvos)
@@ -599,8 +594,6 @@ impl Gfx {
         let f_dir = self.formato(12.0 * s, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_TEXT_ALIGNMENT_TRAILING)?;
         let f_glifo = self.formato(14.0 * s, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_TEXT_ALIGNMENT_CENTER)?;
         let f_glifo_nivel = self.formato(15.0 * s, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_TEXT_ALIGNMENT_CENTER)?;
-        let f_centro = self.formato(12.0 * s, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_TEXT_ALIGNMENT_CENTER)?;
-        let f_centro_forte = self.formato(12.0 * s, DWRITE_FONT_WEIGHT_BOLD, DWRITE_TEXT_ALIGNMENT_CENTER)?;
         let apagado = mistura(t.texto, t.fundo, 0.3);
         let rotulo = mistura(t.texto, t.fundo, 0.45);
         let hover = |a: AlvoPainel| c.hover == Some(a);
@@ -674,7 +667,7 @@ impl Gfx {
                         }
                         alvos.push((r, *al));
                     }
-                    let link = matches!(alvo, Some(AlvoPainel::Link(_) | AlvoPainel::Notificacoes));
+                    let link = matches!(alvo, Some(AlvoPainel::Link(_)));
                     let (tinta_g, tinta) = if *sel {
                         (t.destaque, t.texto_forte)
                     } else if link {
@@ -717,56 +710,6 @@ impl Gfx {
                     let cheio = if *mudo { t.texto_escuro } else if hover(*alvo) { t.texto_forte } else { t.destaque };
                     self.preencher(ret(l0, meio - e, l0 + (l1 - l0) * nivel.clamp(0.0, 1.0), meio + e), cor(cheio, 1.0))?;
                     alvos.push((ret(l0, y, l1, fim), *alvo));
-                }
-                LinhaPainel::Mes { texto, fora } => {
-                    self.texto(texto, &f_forte, ret(pad, y + 2.0 * s, w - pad, fim), cor(t.texto_forte, 1.0))?;
-                    // setas na coluna do sábado, "hoje" antes delas
-                    let cel = 26.0 * s;
-                    let (topo, base) = (y + 5.0 * s, fim - 1.0 * s);
-                    let rs = ret(w - pad + 4.0 * s - cel, topo, w - pad + 4.0 * s, base);
-                    let ra = ret(rs.left - cel, topo, rs.left, base);
-                    for (r, al, g) in [(ra, AlvoPainel::MesAnterior, G_SETA_ESQ), (rs, AlvoPainel::MesSeguinte, G_SETA)] {
-                        if hover(al) {
-                            self.preencher(r, cor(t.fundo_claro, 1.0))?;
-                        }
-                        self.glifo(g, &f_glifo, r, cor(if hover(al) { t.texto_forte } else { t.texto }, 1.0))?;
-                        alvos.push((r, al));
-                    }
-                    if *fora {
-                        let lh = self.largura("hoje", &f_centro)? + 16.0 * s;
-                        let r = ret(ra.left - 4.0 * s - lh, topo, ra.left - 4.0 * s, base);
-                        if hover(AlvoPainel::Hoje) {
-                            self.preencher(r, cor(t.fundo_claro, 1.0))?;
-                        }
-                        self.texto("hoje", &f_centro, r, cor(t.destaque, 1.0))?;
-                        alvos.push((r, AlvoPainel::Hoje));
-                    }
-                }
-                LinhaPainel::DiasSemana => {
-                    self.preencher(ret(0.0, y, w, y + 1.0 * s), cor(t.selecao, 1.0))?;
-                    let col = (w - 2.0 * pad) / 7.0;
-                    for (i, d) in INICIAIS.iter().enumerate() {
-                        let x = pad + col * i as f32;
-                        self.texto(d, &f_centro, ret(x, y + 4.0 * s, x + col, fim), cor(rotulo, 1.0))?;
-                    }
-                }
-                LinhaPainel::Semana(dias) => {
-                    let col = (w - 2.0 * pad) / 7.0;
-                    for (i, d) in dias.iter().enumerate() {
-                        let x = pad + col * i as f32;
-                        let r = ret(x, y, x + col, fim);
-                        let n = d.n.to_string();
-                        match d.tipo {
-                            TipoDia::Hoje => {
-                                self.texto(&n, &f_centro_forte, r, cor(t.destaque, 1.0))?;
-                                let (cx, l) = ((r.left + r.right) / 2.0, 8.0 * s);
-                                self.preencher(ret(cx - l, fim - 4.0 * s, cx + l, fim - 2.0 * s), cor(t.destaque, 1.0))?;
-                            }
-                            TipoDia::Util => self.texto(&n, &f_centro, r, cor(t.texto, 1.0))?,
-                            TipoDia::FimDeSemana => self.texto(&n, &f_centro, r, cor(apagado, 1.0))?,
-                            TipoDia::Fora => self.texto(&n, &f_centro, r, cor(t.texto_escuro, 1.0))?,
-                        }
-                    }
                 }
                 LinhaPainel::Espaco(_) => {}
             }

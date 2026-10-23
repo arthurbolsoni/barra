@@ -5,6 +5,8 @@ edition = "2021"
 description = "Barra de tarefas própria com grupos de janelas, para monitor ultrawide"
 
 [dependencies]
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+serde_json = "1"
 windows = { version = "0.61", features = [
     "Devices_Bluetooth",
     "Devices_Enumeration",
@@ -57,6 +59,6 @@ lto = true
 strip = true
 
 [workspace]
-members = ["menus", "gancho"]
+members = ["menus", "gancho", "central"]
 # `cargo build` também gera as DLLs que ficam ao lado do barra.exe
-default-members = [".", "menus", "gancho"]
+default-members = [".", "menus", "gancho", "central"]
