@@ -11,14 +11,27 @@
 //!
 //! Nada aqui pode entrar em pânico nem travar: roda dentro de outros programas.
 
+use std::ffi::c_void;
 use std::panic::catch_unwind;
 use std::sync::atomic::{AtomicU16, AtomicU32, AtomicUsize, Ordering};
 use std::sync::Mutex;
 
-use windows::core::{PCSTR, PCWSTR};
-use windows::Win32::Foundation::{LPARAM, LRESULT, WPARAM};
-use windows::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryW};
-use windows::Win32::UI::WindowsAndMessaging::CallNextHookEx;
+// Declaradas aqui em vez de vir do crate windows: o Cargo unifica as features dele em todo o
+// workspace, e cada feature nova da barra mudava os bytes desta DLL (e a posição na tabela).
+type WPARAM = usize;
+type LPARAM = isize;
+type LRESULT = isize;
+
+#[link(name = "kernel32")]
+extern "system" {
+    fn LoadLibraryW(nome: *const u16) -> *mut c_void;
+    fn GetProcAddress(modulo: *mut c_void, nome: *const u8) -> *const c_void;
+}
+
+#[link(name = "user32")]
+extern "system" {
+    fn CallNextHookEx(gancho: *mut c_void, code: i32, wp: WPARAM, lp: LPARAM) -> LRESULT;
+}
 
 const TAMANHO: usize = 520;
 
@@ -77,10 +90,10 @@ fn carregar(s: u32) {
         return; // mudou durante a leitura
     }
     caminho[TAMANHO - 1] = 0;
-    let modulo = (caminho[0] != 0).then(|| unsafe { LoadLibraryW(PCWSTR(caminho.as_ptr())) }.ok()).flatten();
+    let modulo = if caminho[0] != 0 { unsafe { LoadLibraryW(caminho.as_ptr()) } } else { std::ptr::null_mut() };
     for (f, nome) in FUNCOES.iter().zip(NOMES) {
-        let p = modulo.and_then(|m| unsafe { GetProcAddress(m, PCSTR(nome.as_ptr() as *const u8)) });
-        f.store(p.map_or(0, |p| p as usize), Ordering::Release);
+        let p = if modulo.is_null() { std::ptr::null() } else { unsafe { GetProcAddress(modulo, nome.as_ptr() as *const u8) } };
+        f.store(p as usize, Ordering::Release);
     }
     CARREGADA.store(s, Ordering::Release);
 }
@@ -100,7 +113,7 @@ fn funcao(i: usize) -> Option<Gancho> {
 fn repassar(i: usize, code: i32, wp: WPARAM, lp: LPARAM) -> LRESULT {
     match catch_unwind(|| funcao(i)).ok().flatten() {
         Some(f) => unsafe { f(code, wp, lp) },
-        None => unsafe { CallNextHookEx(None, code, wp, lp) },
+        None => unsafe { CallNextHookEx(std::ptr::null_mut(), code, wp, lp) },
     }
 }
 
