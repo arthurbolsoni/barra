@@ -33,6 +33,8 @@ pub static PAINEL: AtomicIsize = AtomicIsize::new(0);
 /// Central aberta: como na visão geral, as teclas vão para ela mesmo sem o foco.
 pub static CENTRAL_ABERTA: AtomicBool = AtomicBool::new(false);
 pub static CENTRAL: AtomicIsize = AtomicIsize::new(0);
+/// Win apertado e nenhuma outra tecla desde então.
+static WIN_SOZINHO: AtomicBool = AtomicBool::new(false);
 /// Só para teste (BARRA_TESTE=1): aceita teclas simuladas por SendInput.
 static ACEITA_SIMULADA: AtomicBool = AtomicBool::new(false);
 
@@ -52,6 +54,28 @@ unsafe extern "system" fn gancho(code: i32, wp: WPARAM, lp: LPARAM) -> LRESULT {
         let desce = wp.0 as u32 == WM_KEYDOWN || wp.0 as u32 == WM_SYSKEYDOWN;
         let vk = VIRTUAL_KEY(k.vkCode as u16);
         if !injetada {
+            // Win apertado e solto sozinho: abre o lançador no lugar do Iniciar
+            let win = vk == VK_LWIN || vk == VK_RWIN;
+            if win && desce {
+                // a repetição automática manda vários "desce": só o primeiro arma
+                if !apertada(VK_LWIN) && !apertada(VK_RWIN) {
+                    WIN_SOZINHO.store(true, Ordering::Relaxed);
+                }
+            } else if win {
+                if WIN_SOZINHO.swap(false, Ordering::Relaxed) {
+                    if let Ok(l) = FindWindowW(windows::core::w!("LancadorRs"), windows::core::PCWSTR::null()) {
+                        soltar_win_mascarado(vk);
+                        // quem mandou a última tecla pode trocar o foco: passa a vez ao lançador
+                        let mut pid = 0;
+                        GetWindowThreadProcessId(l, Some(&mut pid));
+                        _ = AllowSetForegroundWindow(pid);
+                        _ = PostMessageW(Some(l), WM_APP + 4, WPARAM(0), LPARAM(0));
+                        return LRESULT(1);
+                    }
+                }
+            } else if desce {
+                WIN_SOZINHO.store(false, Ordering::Relaxed);
+            }
             // Ctrl+Win+←/→: no lugar da troca de área de trabalho virtual do Windows
             if (vk == VK_LEFT || vk == VK_RIGHT) && desce && apertada(VK_CONTROL) && (apertada(VK_LWIN) || apertada(VK_RWIN)) {
                 postar(WM_GRUPO_VIZINHO, (vk == VK_RIGHT) as usize);
@@ -139,6 +163,21 @@ pub fn mascarar() {
         },
     };
     unsafe { SendInput(&[tecla(false), tecla(true)], size_of::<INPUT>() as i32) };
+}
+
+/// No lugar do Win solto real (segurado pelo gancho): 0xE8 aperta e solta, depois o Win solta.
+/// O Iniciar vê uma combinação e não abre.
+unsafe fn soltar_win_mascarado(win: VIRTUAL_KEY) {
+    let tecla = |vk: VIRTUAL_KEY, flags: KEYBD_EVENT_FLAGS| INPUT {
+        r#type: INPUT_KEYBOARD,
+        Anonymous: INPUT_0 { ki: KEYBDINPUT { wVk: vk, dwFlags: flags, ..Default::default() } },
+    };
+    let seq = [
+        tecla(VIRTUAL_KEY(0xE8), KEYBD_EVENT_FLAGS(0)),
+        tecla(VIRTUAL_KEY(0xE8), KEYEVENTF_KEYUP),
+        tecla(win, KEYEVENTF_KEYUP | KEYEVENTF_EXTENDEDKEY),
+    ];
+    SendInput(&seq, size_of::<INPUT>() as i32);
 }
 
 /// Traz a janela para a frente mesmo quando o Windows bloqueia a troca de foco (o processo
