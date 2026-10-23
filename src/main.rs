@@ -235,6 +235,7 @@ fn cena(st: &mut Estado, w: i32, h: i32) -> Cena {
         aberto: st.painel.tipo.map(|t| match t {
             painel::Tipo::Volume => Alvo::Volume,
             painel::Tipo::Rede => Alvo::Rede,
+            painel::Tipo::Calendario => Alvo::Relogio,
         }),
     }
 }
@@ -302,7 +303,7 @@ fn clicar(alvo: Alvo) {
         Alvo::Bandeja(i) => bandeja::clicar(i, bandeja::Botao::Esquerdo, cursor()),
         Alvo::Rede => abrir_painel(painel::Tipo::Rede),
         Alvo::Volume => abrir_painel(painel::Tipo::Volume),
-        Alvo::Relogio => sistema::abrir_notificacoes(),
+        Alvo::Relogio => abrir_painel(painel::Tipo::Calendario),
     }
 }
 
@@ -316,7 +317,8 @@ fn mostrar_dica(st: &mut Estado) {
         Some(Alvo::Janela(h)) => janelas::titulo(hwnd(h)),
         Some(Alvo::Relogio) => {
             let t = unsafe { GetLocalTime() };
-            format!("{}, {} de {} de {}", DIAS[t.wDayOfWeek as usize % 7], t.wDay, MESES[(t.wMonth as usize + 11) % 12], t.wYear)
+            let semana = painel::semana_iso(t.wYear as i32, t.wMonth as u32, t.wDay as u32);
+            format!("{}, {} de {} de {} · semana {semana}", DIAS[t.wDayOfWeek as usize % 7], t.wDay, MESES[(t.wMonth as usize + 11) % 12], t.wYear)
         }
         Some(Alvo::Rede) => st.rede.2.clone(),
         Some(Alvo::Volume) => match st.audio.as_ref().and_then(|a| a.nivel()) {
@@ -512,19 +514,27 @@ fn abrir_painel(tipo: painel::Tipo) {
         let alvo = match tipo {
             painel::Tipo::Volume => Alvo::Volume,
             painel::Tipo::Rede => Alvo::Rede,
+            painel::Tipo::Calendario => Alvo::Relogio,
         };
         let r = st.alvos.iter().find(|(_, a)| *a == alvo).map(|(r, _)| *r)?;
         st.painel.tipo = Some(tipo);
         st.painel.hover = None;
         st.painel.arrasto = None;
         st.painel.ticks = 0;
+        st.painel.ir_para_hoje();
         renovar_painel(st);
         let mut b = RECT::default();
         unsafe { _ = GetWindowRect(st.barra, &mut b) };
         let m = appbar::monitor();
         let w = (painel::LARGURA * st.escala).round() as i32;
         let h = desenho::altura_painel(&st.painel.linhas(st.audio.as_ref()), st.escala);
-        let x = (b.left + r.left as i32 - (12.0 * st.escala) as i32).clamp(m.left, m.right - w);
+        // o calendário fica centrado embaixo do relógio; rede e volume, alinhados ao ícone
+        let x = if tipo == painel::Tipo::Calendario {
+            b.left + ((r.left + r.right) / 2.0) as i32 - w / 2
+        } else {
+            b.left + r.left as i32 - (12.0 * st.escala) as i32
+        }
+        .clamp(m.left, m.right - w);
         unsafe {
             _ = SetWindowPos(st.painel.hwnd, Some(HWND_TOPMOST), x, b.bottom, w, h, SWP_SHOWWINDOW | SWP_NOACTIVATE);
             _ = ShowWindow(st.dica, SW_HIDE);
@@ -590,6 +600,14 @@ fn clicar_painel(st: &mut Estado, alvo: AlvoPainel, x: i32) {
         AlvoPainel::Link(i) => {
             fechar_painel(st);
             abrir_link(i);
+            return;
+        }
+        AlvoPainel::MesAnterior => st.painel.mudar_mes(-1),
+        AlvoPainel::MesSeguinte => st.painel.mudar_mes(1),
+        AlvoPainel::Hoje => st.painel.ir_para_hoje(),
+        AlvoPainel::Notificacoes => {
+            fechar_painel(st);
+            sistema::abrir_notificacoes();
             return;
         }
     }
@@ -667,6 +685,12 @@ unsafe fn proc_painel(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
             _ = ScreenToClient(h, &mut pt);
             let delta = ((wp.0 >> 16) & 0xFFFF) as i16;
             _ = com(|st| {
+                // no calendário a roda troca de mês (para cima, o anterior)
+                if st.painel.tipo == Some(painel::Tipo::Calendario) {
+                    st.painel.mudar_mes(if delta > 0 { -1 } else { 1 });
+                    invalidar(h);
+                    return;
+                }
                 let alvo = match alvo_painel_em(&st.painel.alvos, pt.x, pt.y) {
                     Some(a @ AlvoPainel::Programa(_)) => a,
                     _ => AlvoPainel::Nivel,
@@ -683,12 +707,12 @@ unsafe fn proc_painel(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
             LRESULT(0)
         }
         WM_CLIQUE_FORA => {
-            // no ícone de rede/volume quem decide é o clique na barra (fecha ou troca de painel)
+            // no ícone de rede/volume ou no relógio quem decide é o clique na barra (fecha ou troca de painel)
             let (x, y) = xy(lp);
             _ = com(|st| {
                 let mut b = RECT::default();
                 _ = GetWindowRect(st.barra, &mut b);
-                let no_icone = matches!(alvo_em(&st.alvos, x - b.left, y - b.top), Some(Alvo::Rede | Alvo::Volume));
+                let no_icone = matches!(alvo_em(&st.alvos, x - b.left, y - b.top), Some(Alvo::Rede | Alvo::Volume | Alvo::Relogio));
                 if !(no_icone && PtInRect(&b, POINT { x, y }).as_bool()) {
                     fechar_painel(st);
                 }

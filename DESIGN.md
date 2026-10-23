@@ -255,7 +255,7 @@ Só ícone, sem título.
 - **Rede:** glifo de 14 px em `texto` numa célula de 28 px: cabo (`f0200`), Wi-Fi (`f05a9`) ou VPN (`f0582`), conforme a placa por onde sai a internet; sem conexão, `f0319` em `texto-apagado`. Dica "{placa}: {IPv4}".
 - **Volume:** glifo de 14 px numa célula de 28 px, pelo nível: `f057f` até 33%, `f0580` até 66%, `f057e` acima; mudo `f0581` em `vermelho`. Dica "Volume: {n}%" ou "Volume: mudo".
 - **Painel aberto:** o ícone fica com fundo `fundo-claro` e glifo em `texto-forte`.
-- **Relógio:** "{Dia da semana} HH:MM" ("Quarta-feira 23:22"), dia com inicial maiúscula e sem vírgula, como o "Friday 12:13" do Omarchy; `texto`, 12 px. Dica com a data por extenso ("Terça-feira, 21 de outubro de 2026").
+- **Relógio:** "{Dia da semana} HH:MM" ("Quarta-feira 23:22"), dia com inicial maiúscula e sem vírgula, como o "Friday 12:13" do Omarchy; `texto`, 12 px. Dica com a data por extenso e a semana ISO ("Terça-feira, 21 de outubro de 2026 · semana 43"). Clique abre o calendário; com ele aberto, fundo `fundo-claro` e texto `texto-forte`.
 
 ### Dica (tooltip)
 - **Corner Style:** reto (0 px).
@@ -274,6 +274,13 @@ Abre colado embaixo da barra, alinhado ao ícone (12 px antes dele) e preso à b
 - **Item (26 px):** glifo de 14 px numa coluna de 26 px, texto a partir de 40 px, detalhe à direita (IP, "conectado" em `destaque`, "conectando…" em `amarelo`, "desconectada" apagado) e marca `f00c` em `destaque` na saída padrão. Item escolhido: texto `texto-forte`, glifo `destaque`. Hover `fundo-claro`.
 - **Programa (22 px):** ícone da janela do programa (14 px) ou `f08c6`, nome apagado até 112 px e trilho de 4 px até a borda.
 - **Atalhos:** "Configurações de …" no pé, com linha `selecao` em cima, glifo `f0493` em `texto-escuro` e texto apagado.
+
+### Calendário
+Mesmo painel (300 px, fundo, borda e comportamento), centrado embaixo do relógio. Abre sempre no mês de hoje; a roda do mouse troca de mês (para cima, o anterior).
+- **Mês (32 px):** "Outubro 2026" em negrito `texto-forte`; à direita, setas `f104` e `f105` em células de 26 px alinhadas à coluna do sábado (hover `fundo-claro`, glifo `texto-forte`). Fora do mês de hoje, "hoje" em `destaque` antes das setas.
+- **Dias da semana (26 px):** linha de 1 px `selecao` em cima e iniciais "D S T Q Q S S" com a cor dos rótulos de seção. Semana começa no domingo.
+- **Semanas:** sempre seis linhas de 26 px, para a altura não mudar entre meses; sete colunas iguais entre as margens de 12 px. Dia útil em `texto`, fim de semana apagado, dias dos meses vizinhos em `texto-escuro`. Hoje em negrito `destaque` com linha de 2×16 px em `destaque` embaixo do número. Os dias não são clicáveis.
+- **Pé:** "Notificações" (`f009a`, abre a central de notificações, que antes era o clique no relógio) com linha `selecao` em cima e "Configurações de data e hora", no estilo dos atalhos.
 
 ### Cards / Containers (cartão de grupo)
 - **Corner Style:** reto (0 px).
