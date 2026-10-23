@@ -1,5 +1,6 @@
-//! Carregada pelo Windows em cada programa com janela, pelos ganchos globais que a barra
-//! instala (SetWindowsHookEx). Põe no tema da barra os menus Win32 dos outros programas:
+//! Carregada em cada programa com janela pela barra_gancho.dll, a DLL dos ganchos globais que a
+//! barra instala (SetWindowsHookEx), que repassa os ganchos para cá. Põe no tema da barra os
+//! menus Win32 dos outros programas:
 //!
 //! - modo claro ou escuro do uxtheme (SetPreferredAppMode, ordinal 135, e FlushMenuThemes,
 //!   136), a técnica do mod "Dark mode context menus" do Windhawk;
@@ -19,6 +20,10 @@
 //! Menus que o próprio programa desenha (itens owner-draw ou com bitmap de callback, como os do
 //! Explorer) ficam só com o modo escuro. Nada aqui pode entrar em pânico: um pânico dentro de
 //! outro programa derrubaria o programa.
+//!
+//! Cada versão da barra traz uma cópia nova desta DLL, e as antigas continuam presas nos
+//! programas, desligadas. Uma cópia desligada desfaz o que ela fez; o que outra cópia fez na
+//! mesma janela fica (as marcas nas janelas guardam a cópia, pelo HMODULE).
 
 
 mod controles;
@@ -161,7 +166,8 @@ pub extern "system" fn gancho(code: i32, wp: WPARAM, lp: LPARAM) -> LRESULT {
 
 /// WH_CALLWNDPROCRET: depois de o programa preparar o menu (WM_INITMENUPOPUP), converte os
 /// itens; ao fechar (WM_UNINITMENUPOPUP), devolve. Janela com barra de menus ganha a subclasse
-/// que pinta a faixa; janela com barra de título do Windows ganha os botões do tema.
+/// que pinta a faixa; janela com barra de título do Windows ganha os botões do tema; diálogo e
+/// janela sem botão na barra, a moldura do tema.
 #[no_mangle]
 pub extern "system" fn gancho_retorno(code: i32, wp: WPARAM, lp: LPARAM) -> LRESULT {
     if code >= 0 && lp.0 != 0 {
@@ -173,7 +179,11 @@ pub extern "system" fn gancho_retorno(code: i32, wp: WPARAM, lp: LPARAM) -> LRES
                 WM_NCPAINT | WM_NCACTIVATE | WM_ACTIVATE if ligado() => {
                     vestir_barra_de_menus(m.hwnd);
                     vestir_botoes(m.hwnd);
+                    if m.message == WM_NCACTIVATE {
+                        vestir_moldura(m.hwnd, m.wParam.0 != 0);
+                    }
                 }
+                WM_SHOWWINDOW if ligado() && m.wParam.0 != 0 => vestir_moldura(m.hwnd, GetForegroundWindow() == m.hwnd),
                 WM_WINDOWPOSCHANGED if ligado() => vestir_botoes(m.hwnd),
                 _ => {}
             }
@@ -824,11 +834,11 @@ unsafe fn vestir_barra_de_menus(h: HWND) {
     if h.is_invalid() || GetWindowLongW(h, GWL_STYLE) as u32 & WS_CHILD.0 != 0 || GetMenu(h).is_invalid() {
         return;
     }
-    // GetProp: só uma vez por janela
-    if !GetPropW(h, w!("barra-menus")).0.is_null() {
+    // uma vez por janela e por cópia da DLL: a propriedade guarda a cópia
+    if GetPropW(h, w!("barra-menus")).0 == modulo().0 {
         return;
     }
-    _ = SetPropW(h, w!("barra-menus"), Some(HANDLE(1 as *mut _)));
+    _ = SetPropW(h, w!("barra-menus"), Some(HANDLE(modulo().0)));
     prender();
     _ = SetWindowSubclass(h, Some(proc_barra_de_menus), 0xBA04, 0);
     if converter_barra(GetMenu(h)) {
@@ -967,6 +977,83 @@ unsafe fn item_da_barra(h: HWND, dc: HDC, r: RECT, e: u32, t: &[u16]) -> bool {
     true
 }
 
+// ---------- moldura das janelas sem botão na barra ----------
+
+/// A barra pinta, de fora, a moldura das janelas com botão na barra (src/molduras.rs). As
+/// outras (diálogos com dona, janelas de ferramentas) recebem aqui o mesmo desenho: barra de
+/// título em `fundo` com texto em `texto`, borda `destaque` com a janela ativa e `mudo` sem ela,
+/// cantos retos. A propriedade marca a janela pintada; a outra guarda o modo escuro de antes,
+/// mais 1.
+const PROP_MOLDURA: PCWSTR = w!("barra-moldura");
+const PROP_ESCURO: PCWSTR = w!("barra-moldura-escuro");
+/// Volta a cor ao padrão do Windows (DWMWA_COLOR_DEFAULT).
+const COR_PADRAO: u32 = 0xFFFF_FFFF;
+
+fn dwm(h: HWND, atributo: DWMWINDOWATTRIBUTE, v: u32) {
+    unsafe { _ = DwmSetWindowAttribute(h, atributo, &v as *const _ as *const _, 4) };
+}
+
+/// O critério da barra para dar botão a uma janela (src/janelas.rs, `de_tarefa`).
+unsafe fn da_barra(h: HWND) -> bool {
+    if !IsWindowVisible(h).as_bool() || GetWindowTextLengthW(h) == 0 {
+        return false;
+    }
+    let ex = GetWindowLongW(h, GWL_EXSTYLE) as u32;
+    if ex & WS_EX_APPWINDOW.0 == 0
+        && (ex & (WS_EX_TOOLWINDOW.0 | WS_EX_NOACTIVATE.0) != 0 || GetWindow(h, GW_OWNER).is_ok_and(|o| !o.is_invalid()))
+    {
+        return false;
+    }
+    let mut escondida = 0u32;
+    _ = DwmGetWindowAttribute(h, DWMWA_CLOAKED, &mut escondida as *mut _ as *mut _, 4);
+    escondida == 0
+}
+
+/// `ativa`: a janela está ativa (borda em destaque).
+unsafe fn vestir_moldura(h: HWND, ativa: bool) {
+    let estilo = GetWindowLongW(h, GWL_STYLE) as u32;
+    if h.is_invalid() || estilo & WS_CHILD.0 != 0 || estilo & WS_CAPTION.0 != WS_CAPTION.0 || controles::excluido() || da_barra(h) {
+        return;
+    }
+    // o modo escuro de antes fica com a primeira cópia da DLL que pintou a janela
+    if GetPropW(h, PROP_ESCURO).0.is_null() {
+        let mut escuro = 0u32;
+        _ = DwmGetWindowAttribute(h, DWMWA_USE_IMMERSIVE_DARK_MODE, &mut escuro as *mut _ as *mut _, 4);
+        _ = SetPropW(h, PROP_ESCURO, Some(HANDLE((escuro as usize + 1) as *mut _)));
+    }
+    _ = SetPropW(h, PROP_MOLDURA, Some(HANDLE(modulo().0)));
+    dwm(h, DWMWA_USE_IMMERSIVE_DARK_MODE, (MODO.load(Ordering::Relaxed) != CLARO) as u32);
+    dwm(h, DWMWA_CAPTION_COLOR, cor(FUNDO).0);
+    dwm(h, DWMWA_TEXT_COLOR, cor(TEXTO).0);
+    dwm(h, DWMWA_BORDER_COLOR, cor(if ativa { DESTAQUE } else { MUDO }).0);
+    dwm(h, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_DONOTROUND.0 as u32);
+}
+
+/// Moldura do Windows de volta (tema desligado), também na janela pintada por outra cópia.
+unsafe fn despir_moldura(h: HWND) {
+    if GetPropW(h, PROP_MOLDURA).0.is_null() {
+        return;
+    }
+    let escuro = RemovePropW(h, PROP_ESCURO).map_or(1, |p| p.0 as usize).saturating_sub(1);
+    _ = RemovePropW(h, PROP_MOLDURA);
+    dwm(h, DWMWA_CAPTION_COLOR, COR_PADRAO);
+    dwm(h, DWMWA_TEXT_COLOR, COR_PADRAO);
+    dwm(h, DWMWA_BORDER_COLOR, COR_PADRAO);
+    dwm(h, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_DEFAULT.0 as u32);
+    dwm(h, DWMWA_USE_IMMERSIVE_DARK_MODE, escuro as u32);
+}
+
+/// Troca de tema (ou tema ligado, ou desligado): refaz a moldura de uma janela de primeiro nível.
+pub(crate) fn refazer_moldura(h: HWND) {
+    seguro((), || unsafe {
+        if ligado() {
+            vestir_moldura(h, GetForegroundWindow() == h);
+        } else {
+            despir_moldura(h);
+        }
+    });
+}
+
 // ---------- botões da barra de título ----------
 
 /// Propriedade na janela que ganhou os botões do tema: a janela dos botões.
@@ -1103,10 +1190,23 @@ fn botoes(dono: HWND) -> Option<HWND> {
     (!p.0.is_null()).then(|| HWND(p.0))
 }
 
-/// Janela com barra de título do Windows ganha os botões do tema (uma vez por janela).
+/// A janela dos botões é desta cópia da DLL.
+fn nossa(b: HWND) -> bool {
+    unsafe { GetWindowLongPtrW(b, GWLP_HINSTANCE) == modulo().0 as isize }
+}
+
+/// Janela com barra de título do Windows ganha os botões do tema (uma vez por janela). Se os
+/// de uma cópia antiga ainda estão lá, ela os tira na próxima mensagem da janela, e estes
+/// entram depois.
 unsafe fn vestir_botoes(h: HWND) {
-    if h.is_invalid() || botoes(h).is_some() {
+    if h.is_invalid() {
         return;
+    }
+    if let Some(b) = botoes(h) {
+        if IsWindow(Some(b)).as_bool() {
+            return;
+        }
+        _ = RemovePropW(h, PROP_BOTOES);
     }
     let estilo = GetWindowLongW(h, GWL_STYLE) as u32;
     if estilo & WS_CHILD.0 != 0 || estilo & WS_SYSMENU.0 == 0 || estilo & WS_CAPTION.0 != WS_CAPTION.0 {
@@ -1126,13 +1226,12 @@ unsafe fn vestir_botoes(h: HWND) {
 }
 
 /// Tira os botões do tema; `devolver`: a janela continua aberta e recebe o WS_SYSMENU de volta.
+/// Botões de outra cópia da DLL ficam.
 unsafe fn despir_botoes(h: HWND, devolver: bool) {
-    let b = botoes(h);
-    _ = RemovePropW(h, PROP_BOTOES);
     _ = RemoveWindowSubclass(h, Some(proc_dono_dos_botoes), ID_BOTOES);
-    if let Some(b) = b {
-        _ = DestroyWindow(b);
-    }
+    let Some(b) = botoes(h).filter(|&b| nossa(b)) else { return };
+    _ = RemovePropW(h, PROP_BOTOES);
+    _ = DestroyWindow(b);
     if devolver {
         menu_de_sistema(h, true);
     }

@@ -13,6 +13,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "barra-gancho"
+version = "0.1.0"
+dependencies = [
+ "windows",
+]
+
+[[package]]
 name = "barra-menus"
 version = "0.1.0"
 dependencies = [

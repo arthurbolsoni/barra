@@ -9,7 +9,8 @@
 //! - controles com tema (botão, caixa de seleção, opção, abas, cabeçalho, lista, árvore, barra
 //!   de rolagem, progresso, edição, combo, barra de ferramentas, dica…): DrawThemeBackground
 //!   pinta plano, de canto vivo, nas cores do tema, e DrawThemeText e GetThemeColor dão a cor
-//!   do texto.
+//!   do texto;
+//! - faixa de baixo das caixas de mensagem (Rectangle): como a das caixas de tarefa.
 //!
 //! Os desvios ficam instalados até o programa fechar; com o tema desligado, só passam adiante.
 
@@ -47,6 +48,7 @@ static DRAW_THEME_TEXT_EX: Original = AtomicUsize::new(0);
 static GET_THEME_COLOR: Original = AtomicUsize::new(0);
 static GET_THEME_SYS_COLOR: Original = AtomicUsize::new(0);
 static GET_THEME_SYS_COLOR_BRUSH: Original = AtomicUsize::new(0);
+static RECTANGLE: Original = AtomicUsize::new(0);
 
 type FGetSysColor = unsafe extern "system" fn(i32) -> u32;
 type FGetSysColorBrush = unsafe extern "system" fn(i32) -> HBRUSH;
@@ -60,6 +62,7 @@ type FGetThemeColor = unsafe extern "system" fn(HTHEME, i32, i32, i32, *mut COLO
 type FGetThemeSysColor = unsafe extern "system" fn(HTHEME, i32) -> COLORREF;
 type FGetThemeSysColorBrush = unsafe extern "system" fn(HTHEME, i32) -> HBRUSH;
 type FGetThemeClass = unsafe extern "system" fn(HTHEME, PWSTR, i32) -> HRESULT;
+type FRectangle = unsafe extern "system" fn(HDC, i32, i32, i32, i32) -> BOOL;
 
 /// A função original guardada em `o`. Só serve dentro do próprio desvio (ou depois de
 /// conferir que não é 0): o endereço é gravado antes de o desvio valer.
@@ -86,7 +89,7 @@ unsafe fn desviar(modulo: HMODULE, nome: PCSTR, novo: *const (), o: &Original) -
 static INSTALADOS: AtomicBool = AtomicBool::new(false);
 
 /// A própria barra também carrega a DLL; lá nada é desviado.
-fn excluido() -> bool {
+pub(crate) fn excluido() -> bool {
     static EXCLUIDO: AtomicU32 = AtomicU32::new(2);
     match EXCLUIDO.load(Ordering::Relaxed) {
         2 => {
@@ -106,6 +109,7 @@ fn instalar() {
     UMA_VEZ.call_once(|| unsafe {
         prender();
         let Ok(user32) = GetModuleHandleW(w!("user32.dll")) else { return };
+        let Ok(gdi32) = GetModuleHandleW(w!("gdi32.dll")) else { return };
         let Ok(ux) = LoadLibraryExW(w!("uxtheme.dll"), None, LOAD_LIBRARY_SEARCH_SYSTEM32) else { return };
         // pincéis do sistema antes do desvio, para reconhecer quem usa o padrão do Windows
         for (i, p) in PINCEIS_DO_SISTEMA.iter().enumerate() {
@@ -116,6 +120,7 @@ fn instalar() {
         desviar(user32, PCSTR(c"FillRect".as_ptr() as _), fill_rect as *const (), &FILL_RECT);
         desviar(user32, PCSTR(c"DefWindowProcW".as_ptr() as _), def_window_proc_w as *const (), &DEF_WINDOW_PROC_W);
         desviar(user32, PCSTR(c"DefWindowProcA".as_ptr() as _), def_window_proc_a as *const (), &DEF_WINDOW_PROC_A);
+        desviar(gdi32, PCSTR(c"Rectangle".as_ptr() as _), rectangle as *const (), &RECTANGLE);
         desviar(ux, PCSTR(c"DrawThemeBackground".as_ptr() as _), draw_theme_background as *const (), &DRAW_THEME_BACKGROUND);
         desviar(ux, PCSTR(c"DrawThemeBackgroundEx".as_ptr() as _), draw_theme_background_ex as *const (), &DRAW_THEME_BACKGROUND_EX);
         desviar(ux, PCSTR(c"DrawThemeTextEx".as_ptr() as _), draw_theme_text_ex as *const (), &DRAW_THEME_TEXT_EX);
@@ -171,6 +176,24 @@ fn pincel(papel: usize) -> HBRUSH {
         PINCEIS_COR[papel].store(c, Ordering::Release);
         PINCEIS[papel].store(novo.0 as isize, Ordering::Release);
         novo
+    }
+}
+
+static CANETAS: [AtomicIsize; 9] = [const { AtomicIsize::new(0) }; 9];
+static CANETAS_COR: [AtomicU32; 9] = [const { AtomicU32::new(u32::MAX) }; 9];
+
+/// Caneta de 1 px do papel na cor atual do tema; as de cores antigas ficam, como os pincéis.
+fn caneta(papel: usize) -> HPEN {
+    let c = cor(papel).0;
+    let atual = CANETAS[papel].load(Ordering::Acquire);
+    unsafe {
+        if atual != 0 && CANETAS_COR[papel].load(Ordering::Acquire) == c && GetObjectType(HGDIOBJ(atual as *mut _)) == OBJ_PEN.0 as u32 {
+            return HPEN(atual as *mut _);
+        }
+        let nova = CreatePen(PS_SOLID, 1, COLORREF(c));
+        CANETAS_COR[papel].store(c, Ordering::Release);
+        CANETAS[papel].store(nova.0 as isize, Ordering::Release);
+        nova
     }
 }
 
@@ -236,6 +259,37 @@ fn preencher_direto(dc: HDC, r: &RECT, b: HBRUSH) {
             _ => _ = original::<FFillRect>(&FILL_RECT)(dc, r, b),
         }
     }
+}
+
+/// Faixa de baixo de uma caixa de mensagem: retângulo num diálogo, de um lado a outro até o pé
+/// da janela, com pincel sólido na cor 3D do Windows. O user32 cria esse pincel com a cor lida
+/// direto do sistema, sem passar pelo GetSysColor.
+unsafe fn faixa_de_caixa(dc: HDC, e: i32, d: i32, b: i32) -> bool {
+    let mut lb = LOGBRUSH::default();
+    if GetObjectW(GetCurrentObject(dc, OBJ_BRUSH), size_of::<LOGBRUSH>() as i32, Some(&mut lb as *mut _ as *mut _)) == 0
+        || lb.lbStyle != BS_SOLID
+        || lb.lbColor.0 != cor_do_sistema(COLOR_3DFACE.0)
+    {
+        return false;
+    }
+    let janela = WindowFromDC(dc);
+    let mut c = RECT::default();
+    classe_da_janela(janela, "#32770") && GetClientRect(janela, &mut c).is_ok() && e <= c.left && d >= c.right && b >= c.bottom
+}
+
+/// A faixa fica como a das caixas de tarefa: `fundo_claro`, com uma linha `mudo` em cima.
+unsafe extern "system" fn rectangle(dc: HDC, e: i32, c: i32, d: i32, b: i32) -> BOOL {
+    let o = original::<FRectangle>(&RECTANGLE);
+    if ligado() && seguro(false, || faixa_de_caixa(dc, e, d, b)) {
+        let pincel_antes = SelectObject(dc, pincel(FUNDO_CLARO).into());
+        let caneta_antes = SelectObject(dc, caneta(FUNDO_CLARO).into());
+        let feito = o(dc, e, c, d, b);
+        SelectObject(dc, pincel_antes);
+        SelectObject(dc, caneta_antes);
+        preencher_direto(dc, &RECT { left: e, top: c, right: d, bottom: c + 1 }, pincel(MUDO));
+        return feito;
+    }
+    o(dc, e, c, d, b)
 }
 
 // ---------- fundo e texto padrão das janelas ----------
@@ -451,6 +505,7 @@ unsafe fn refazer(h: HWND) {
             _ = PostMessageW(Some(j), WM_THEMECHANGED, WPARAM(0), LPARAM(0));
         }
     }
+    crate::refazer_moldura(h);
     _ = RedrawWindow(Some(h), None, None, RDW_INVALIDATE | RDW_ERASE | RDW_FRAME | RDW_ALLCHILDREN);
 }
 

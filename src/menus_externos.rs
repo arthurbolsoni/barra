@@ -1,18 +1,23 @@
 //! Menus Win32 dos outros programas (bandeja, clique direito, menu de sistema, barra de menus
-//! clássica) e botões da barra de título no tema. A barra instala ganchos globais e o Windows carrega a barra_menus.dll em
-//! cada programa com janela; a DLL faz o resto lá dentro (ver menus/src/lib.rs).
-//! Só alcança programas de 64 bits que não rodam como administrador.
+//! clássica), botões da barra de título e controles no tema. A barra instala ganchos globais
+//! com a barra_gancho.dll; o Windows a carrega em cada programa com janela, e ela carrega lá a
+//! barra_menus.dll, que faz o resto (ver gancho/src/lib.rs e menus/src/lib.rs).
 //!
-//! A DLL fica presa nos programas até eles fecharem, então a barra carrega uma cópia com a
-//! versão no nome (em %LOCALAPPDATA%\barra\menus): o arquivo do build nunca fica travado.
+//! As DLLs ficam presas nos programas até eles fecharem, então a barra usa cópias em
+//! %LOCALAPPDATA%\barra, com o hash do conteúdo no nome: o arquivo do build nunca fica travado,
+//! e a mesma versão tem sempre o mesmo caminho. O da barra_gancho.dll ocupa uma posição na
+//! tabela de DLLs de gancho do Windows, que tem 32 por sessão; como ela quase nunca muda, é a
+//! mesma posição a cada versão da barra.
 
 use std::cell::Cell;
 use std::os::windows::ffi::OsStrExt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
 use windows::core::{s, PCSTR, PCWSTR};
-use windows::Win32::Foundation::{HMODULE, LPARAM, LRESULT, WPARAM};
+use windows::Win32::Foundation::{FreeLibrary, HMODULE, LPARAM, LRESULT, WPARAM};
 use windows::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryW};
+use windows::Win32::System::SystemInformation::GetLocalTime;
 use windows::Win32::UI::WindowsAndMessaging::*;
 
 use crate::tema::Tema;
@@ -22,52 +27,146 @@ const ESCURO: u32 = 2;
 const CLARO: u32 = 3;
 
 type DefinirTema = unsafe extern "system" fn(u32, *const u32);
+/// O `definir_tema` das primeiras versões da barra_menus.dll.
+type DefinirModo = unsafe extern "system" fn(u32);
+type DefinirImplementacao = unsafe extern "system" fn(*const u16);
 type Gancho = unsafe extern "system" fn(i32, WPARAM, LPARAM) -> LRESULT;
 
+#[derive(Clone, Copy)]
+struct Dlls {
+    /// A barra_gancho.dll, dos ganchos.
+    gancho: HMODULE,
+    /// `definir_tema` da barra_menus.dll.
+    definir: DefinirTema,
+}
+
 thread_local! {
-    static DLL: Cell<Option<(HMODULE, DefinirTema)>> = const { Cell::new(None) };
+    /// None: ainda não carregadas; Some(None): não deu.
+    static DLLS: Cell<Option<Option<Dlls>>> = const { Cell::new(None) };
     static GANCHOS: Cell<Option<[HHOOK; 3]>> = const { Cell::new(None) };
-    /// Tema já passado para a DLL.
+    /// Tema já passado para a DLL ("": nenhum, ou o padrão do Windows).
     static ATUAL: Cell<&'static str> = const { Cell::new("") };
+    /// Última tentativa de instalar os ganchos, se falhou, e o erro do Windows.
+    static FALHA: Cell<Option<(Instant, u32)>> = const { Cell::new(None) };
 }
 
-fn pasta() -> Option<PathBuf> {
-    Some(PathBuf::from(std::env::var_os("LOCALAPPDATA")?).join("barra").join("menus"))
+/// Espera entre as tentativas de instalar os ganchos depois de uma falha.
+const ESPERA: Duration = Duration::from_secs(30);
+
+/// `nome` dentro de %LOCALAPPDATA%\barra.
+fn local(nome: &str) -> Option<PathBuf> {
+    Some(PathBuf::from(std::env::var_os("LOCALAPPDATA")?).join("barra").join(nome))
 }
 
-/// Copia a DLL do lado do barra.exe para a pasta das cópias, com data e tamanho no nome, e
-/// apaga as cópias antigas que nenhum programa segura mais.
-fn copia() -> Option<PathBuf> {
-    let origem = std::env::current_exe().ok()?.with_file_name("barra_menus.dll");
-    let meta = std::fs::metadata(&origem).ok()?;
-    let data = meta.modified().ok()?.duration_since(std::time::UNIX_EPOCH).ok()?.as_secs();
-    let dir = pasta()?;
-    std::fs::create_dir_all(&dir).ok()?;
-    let destino = dir.join(format!("barra_menus-{data}-{}.dll", meta.len()));
-    if !destino.exists() {
-        std::fs::copy(&origem, &destino).ok()?;
+fn largo(p: &Path) -> Vec<u16> {
+    p.as_os_str().encode_wide().chain([0]).collect()
+}
+
+/// FNV-1a de 64 bits.
+fn hash(dados: &[u8]) -> u64 {
+    dados.iter().fold(0xcbf2_9ce4_8422_2325, |h, &b| (h ^ b as u64).wrapping_mul(0x100_0000_01b3))
+}
+
+/// Copia `arquivo`, que fica ao lado do barra.exe, para a pasta `destino`, com o hash do
+/// conteúdo no nome.
+fn copiar(arquivo: &str, destino: &Path) -> Option<PathBuf> {
+    let dados = std::fs::read(std::env::current_exe().ok()?.with_file_name(arquivo)).ok()?;
+    let nome = Path::new(arquivo).file_stem()?.to_str()?;
+    std::fs::create_dir_all(destino).ok()?;
+    let copia = destino.join(format!("{nome}-{:016x}.dll", hash(&dados)));
+    if !copia.exists() {
+        // outro nome até terminar: nenhum programa carrega a cópia pela metade
+        let parcial = copia.with_extension("parcial");
+        std::fs::write(&parcial, &dados).ok()?;
+        std::fs::rename(&parcial, &copia).ok()?;
     }
-    if let Ok(lista) = std::fs::read_dir(&dir) {
-        for e in lista.flatten() {
-            if e.path() != destino {
-                _ = std::fs::remove_file(e.path()); // falha enquanto algum programa usa: fica
-            }
+    Some(copia)
+}
+
+/// Apaga as cópias antigas que nenhum programa segura mais. `desligar`: as que ainda estão em
+/// algum programa recebem o padrão do Windows. Se a barra que as usava caiu sem desligá-las,
+/// elas continuariam pintando os programas com o tema daquela hora.
+fn limpar(pasta: &Path, atual: &Path, desligar: bool) {
+    let Ok(lista) = std::fs::read_dir(pasta) else { return };
+    for e in lista.flatten() {
+        let p = e.path();
+        if p == atual || std::fs::remove_file(&p).is_ok() {
+            continue;
+        }
+        if desligar && p.extension().is_some_and(|x| x == "dll") {
+            desligar_copia(&p);
         }
     }
-    Some(destino)
 }
 
-fn dll() -> Option<(HMODULE, DefinirTema)> {
-    if let Some(d) = DLL.get() {
-        return Some(d);
-    }
-    let caminho = copia()?;
-    let w: Vec<u16> = caminho.as_os_str().encode_wide().chain([0]).collect();
+/// O modo e as cores ficam na memória comum da cópia, que a barra alcança carregando o mesmo
+/// arquivo.
+fn desligar_copia(caminho: &Path) {
     unsafe {
-        let m = LoadLibraryW(PCWSTR(w.as_ptr())).ok()?;
+        let Ok(m) = LoadLibraryW(PCWSTR(largo(caminho).as_ptr())) else { return };
+        if let Some(f) = GetProcAddress(m, s!("definir_tema")) {
+            std::mem::transmute::<_, DefinirTema>(f)(PADRAO, std::ptr::null());
+        } else if let Some(f) = GetProcAddress(m, s!("definir_modo")) {
+            std::mem::transmute::<_, DefinirModo>(f)(PADRAO);
+        }
+        _ = FreeLibrary(m);
+    }
+}
+
+fn carregar() -> Option<Dlls> {
+    let (pasta_menus, pasta_gancho) = (local("menus")?, local("gancho")?);
+    let menus = copiar("barra_menus.dll", &pasta_menus)?;
+    let gancho = copiar("barra_gancho.dll", &pasta_gancho)?;
+    limpar(&pasta_menus, &menus, true);
+    limpar(&pasta_gancho, &gancho, false);
+    unsafe {
+        let m = LoadLibraryW(PCWSTR(largo(&menus).as_ptr())).ok()?;
+        let g = LoadLibraryW(PCWSTR(largo(&gancho).as_ptr())).ok()?;
         let definir: DefinirTema = std::mem::transmute(GetProcAddress(m, s!("definir_tema"))?);
-        DLL.set(Some((m, definir)));
-        Some((m, definir))
+        let apontar: DefinirImplementacao = std::mem::transmute(GetProcAddress(g, s!("definir_implementacao"))?);
+        apontar(largo(&menus).as_ptr());
+        Some(Dlls { gancho: g, definir })
+    }
+}
+
+fn dlls() -> Option<Dlls> {
+    if let Some(d) = DLLS.get() {
+        return d;
+    }
+    let d = carregar();
+    if d.is_none() {
+        registrar("ganchos globais: barra_menus.dll ou barra_gancho.dll não carregou");
+    }
+    DLLS.set(Some(d));
+    d
+}
+
+/// Uma linha com data e hora em %LOCALAPPDATA%\barra\barra.log.
+fn registrar(texto: &str) {
+    let Some(caminho) = local("barra.log") else { return };
+    let t = unsafe { GetLocalTime() };
+    let linha = format!("{:04}-{:02}-{:02} {:02}:{:02}:{:02} {texto}\r\n", t.wYear, t.wMonth, t.wDay, t.wHour, t.wMinute, t.wSecond);
+    if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(caminho) {
+        use std::io::Write;
+        _ = f.write_all(linha.as_bytes());
+    }
+}
+
+/// Os três ganchos da barra_gancho.dll; se um falhar, nenhum fica. Erro: o código do Windows.
+fn instalar(m: HMODULE) -> Result<[HHOOK; 3], u32> {
+    let um = |tipo: WINDOWS_HOOK_ID, nome: PCSTR| unsafe {
+        let f: Gancho = std::mem::transmute(GetProcAddress(m, nome).ok_or(127u32)?);
+        SetWindowsHookExW(tipo, Some(f), Some(m.into()), 0).map_err(|e| (e.code().0 & 0xFFFF) as u32)
+    };
+    match (um(WH_GETMESSAGE, s!("gancho")), um(WH_CALLWNDPROCRET, s!("gancho_retorno")), um(WH_CBT, s!("gancho_cbt"))) {
+        (Ok(a), Ok(b), Ok(c)) => Ok([a, b, c]),
+        (a, b, c) => {
+            let erro = [&a, &b, &c].into_iter().find_map(|r| r.as_ref().err().copied()).unwrap_or(0);
+            for h in [a, b, c].into_iter().flatten() {
+                unsafe { _ = UnhookWindowsHookEx(h) };
+            }
+            Err(erro)
+        }
     }
 }
 
@@ -90,45 +189,57 @@ fn cores(t: &Tema) -> [u32; 9] {
     [t.fundo, t.fundo_claro, t.selecao, t.mudo, t.texto, t.texto_forte, t.destaque, mistura(t.texto, t.fundo, 0.3), t.vermelho]
 }
 
-/// Liga ou troca o tema. Chamado a cada atualização da barra; só age quando algo mudou.
+/// Liga ou troca o tema. Chamado a cada atualização da barra; só age quando algo mudou. Se o
+/// Windows recusar os ganchos, tenta de novo a cada `ESPERA` e registra o erro no barra.log.
 pub fn ligar(tema: &'static Tema) {
-    if GANCHOS.get().is_some() && ATUAL.get() == tema.nome {
-        return;
+    let Some(d) = dlls() else { return };
+    let mut avisar = false;
+    if ATUAL.get() != tema.nome {
+        let c = cores(tema);
+        unsafe { (d.definir)(if tema.claro { CLARO } else { ESCURO }, c.as_ptr()) };
+        ATUAL.set(tema.nome);
+        avisar = true;
     }
-    let Some((m, definir)) = dll() else { return };
-    let c = cores(tema);
-    unsafe { definir(if tema.claro { CLARO } else { ESCURO }, c.as_ptr()) };
-    ATUAL.set(tema.nome);
-    if GANCHOS.get().is_none() {
-        let instalar = |tipo: WINDOWS_HOOK_ID, nome: PCSTR| unsafe {
-            let f: Gancho = std::mem::transmute(GetProcAddress(m, nome)?);
-            SetWindowsHookExW(tipo, Some(f), Some(m.into()), 0).ok()
-        };
-        let ganchos = (instalar(WH_GETMESSAGE, s!("gancho")), instalar(WH_CALLWNDPROCRET, s!("gancho_retorno")), instalar(WH_CBT, s!("gancho_cbt")));
-        match ganchos {
-            (Some(a), Some(b), Some(c)) => GANCHOS.set(Some([a, b, c])),
-            (a, b, c) => {
-                for h in [a, b, c].into_iter().flatten() {
-                    unsafe { _ = UnhookWindowsHookEx(h) };
+    if GANCHOS.get().is_none() && FALHA.get().is_none_or(|(t, _)| t.elapsed() >= ESPERA) {
+        match instalar(d.gancho) {
+            Ok(g) => {
+                if FALHA.take().is_some() {
+                    registrar("ganchos globais: instalados");
                 }
+                GANCHOS.set(Some(g));
+                avisar = true;
+            }
+            Err(erro) => {
+                if FALHA.get().is_none_or(|(_, e)| e != erro) {
+                    registrar(&format!("ganchos globais: SetWindowsHookEx falhou com o erro {erro}"));
+                }
+                FALHA.set(Some((Instant::now(), erro)));
             }
         }
     }
-    avisar_todos();
+    if avisar && GANCHOS.get().is_some() {
+        avisar_todos();
+    }
 }
 
-/// Devolve o padrão do Windows a todos os programas e tira os ganchos. A DLL continua nos
-/// programas que já a usaram, só passando as mensagens adiante.
+/// Devolve o padrão do Windows a todos os programas e tira os ganchos. As DLLs continuam nos
+/// programas que já as usaram, só passando as mensagens adiante.
 pub fn desligar() {
-    let Some(g) = GANCHOS.take() else { return };
-    ATUAL.set("");
-    if let Some((_, definir)) = DLL.get() {
-        unsafe { definir(PADRAO, std::ptr::null()) };
-        avisar_todos();
-        // tempo para os programas tirarem a mensagem da fila antes de os ganchos saírem
-        std::thread::sleep(std::time::Duration::from_millis(300));
+    let ganchos = GANCHOS.take();
+    if ATUAL.get().is_empty() && ganchos.is_none() {
+        return;
     }
-    for h in g {
+    ATUAL.set("");
+    FALHA.set(None);
+    if let Some(Some(d)) = DLLS.get() {
+        unsafe { (d.definir)(PADRAO, std::ptr::null()) };
+        if ganchos.is_some() {
+            avisar_todos();
+            // tempo para os programas tirarem a mensagem da fila antes de os ganchos saírem
+            std::thread::sleep(Duration::from_millis(300));
+        }
+    }
+    for h in ganchos.into_iter().flatten() {
         unsafe { _ = UnhookWindowsHookEx(h) };
     }
 }

@@ -56,6 +56,16 @@ Ao sair, a barra do Windows volta como estava (estado guardado em `HKCU\Software
 - A política "Forçar uma cor de fundo e de destaque" (`PersonalColors_*` em `HKLM\Software\Policies\Microsoft\Windows\Personalization`) faz o Windows ignorar a troca. Enquanto o tema está aplicado, ela fica desligada, o que exige a barra rodando como administrador.
 - Os valores de antes ficam em `HKCU\Software\barra\CoresDoWindows` e voltam ao sair, ao desligar a opção e, depois de uma queda, na próxima saída.
 
+## Tema nos outros programas
+
+"Aplicar o tema às janelas e aos menus dos outros programas" (ligado por padrão) leva o tema para dentro dos outros programas: molduras, botões da barra de título, menus Win32 e controles (botões, caixas de seleção, campos, abas, listas, barras de rolagem, caixas de mensagem). O desenho está no DESIGN.md.
+
+- A barra instala ganchos globais (`SetWindowsHookEx`) com a `barra_gancho.dll`, que o Windows carrega em cada programa com janela. Ela carrega lá a `barra_menus.dll`, que faz o trabalho: desvia as funções de cor e de desenho dos controles (crate `retour`), converte os menus em desenho próprio e põe os botões da barra de título.
+- As DLLs usadas são cópias em `%LOCALAPPDATA%\barra\gancho` e `%LOCALAPPDATA%\barra\menus`, com o hash do conteúdo no nome: os programas seguram a DLL até fechar, e o arquivo do build fica livre. Ao abrir, a barra apaga as cópias que nenhum programa segura e desliga as que ainda estão em algum.
+- O Windows guarda as DLLs de gancho global numa tabela de 32 posições por sessão, e uma posição só vaga quando todos os programas que carregaram a DLL a soltam. Por isso o gancho fica na `barra_gancho.dll`, que quase nunca muda e ocupa sempre a mesma posição; a `barra_menus.dll`, que muda a cada versão, entra por `LoadLibrary`, fora da tabela. Com a tabela cheia, o `SetWindowsHookEx` falha com o erro 126; a barra registra a falha em `%LOCALAPPDATA%\barra\barra.log` e tenta de novo a cada 30 s. A tabela esvazia ao sair da sessão do Windows.
+- Alcança programas de 64 bits. Com a barra rodando como administrador, alcança também os programas que rodam como administrador. Apps da Loja (UWP) não carregam a DLL.
+- Desligar a opção ou sair devolve o padrão do Windows.
+
 ## Segurança das janelas estacionadas
 
 - Ao sair, desligar ou dar erro, todas as janelas voltam para a tela.
@@ -67,5 +77,7 @@ Ao sair, a barra do Windows volta como estava (estado guardado em `HKCU\Software
 ```
 cargo build --release
 ```
+
+Gera `barra.exe`, `barra_menus.dll` e `barra_gancho.dll` em `target\release`; as DLLs ficam ao lado do exe.
 
 `barra --preview <arquivo.bmp>` desenha uma barra de exemplo em BMP, sem abrir nada na tela.

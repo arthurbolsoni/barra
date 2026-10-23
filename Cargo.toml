@@ -56,4 +56,6 @@ lto = true
 strip = true
 
 [workspace]
-members = ["menus"]
+members = ["menus", "gancho"]
+# `cargo build` também gera as DLLs que ficam ao lado do barra.exe
+default-members = [".", "menus", "gancho"]

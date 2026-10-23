@@ -295,7 +295,9 @@ Abre colado embaixo da barra, alinhado ao ícone (12 px antes dele) e preso à b
 Texto de 12 px em `texto`, centralizado, itens no formato "Tecla: ação" separados por "  ·  ". Win+Tab e Alt+Tab têm listas próprias. Com filtro ativo, a linha vira "Filtro: {texto}" em `destaque`.
 
 ### Moldura das outras janelas
-Aplicada pelo DWM, sem injeção: modo escuro conforme o tema, barra de título `fundo`, texto `texto`, borda `destaque` na janela em primeiro plano e `mudo` nas outras, cantos retos. Terminais recebem como ícone da barra de título o glifo `>_` (`f120`) em negrito, na cor `texto`, gerado em 16 e 32 px. Tudo volta ao padrão do Windows ao desligar a opção ou sair.
+Aplicada pelo DWM: modo escuro conforme o tema, barra de título `fundo`, texto `texto`, borda `destaque` na janela em primeiro plano e `mudo` nas outras, cantos retos. Terminais recebem como ícone da barra de título o glifo `>_` (`f120`) em negrito, na cor `texto`, gerado em 16 e 32 px. Tudo volta ao padrão do Windows ao desligar a opção ou sair.
+
+A barra pinta de fora as janelas com botão na barra. Diálogos com dona e janelas de ferramentas (Variáveis de Ambiente, caixas de mensagem de um programa) recebem a mesma moldura de dentro do programa, pela `barra_menus.dll`, com a borda em `destaque` enquanto estão ativas.
 
 **Botões da barra de título.** Minimizar, maximizar (restaurar, com a janela maximizada) e fechar viram os glifos do menu de sistema no tema (`f2d1`, `f2d0`, `f2d2`, `f00d`), em 14 px, cada um numa célula de 28 px, colados à borda direita e da borda de cima até a área do programa. Fundo `fundo`, o mesmo da barra de título; glifo em `texto` com a janela ativa e em `texto-apagado` sem ela. Sob o mouse, fundo `fundo-claro` e glifo `texto-forte`, e o fechar com o glifo em `vermelho`; apertado, fundo `selecao`. Sem dica.
 
@@ -311,7 +313,23 @@ Menus de contexto do Win32 (teclado, submenus e posição do Windows), com os it
 - **Separador:** linha de 1 px em `mudo`, recuada 10 px, em item de 9 px.
 - **Textos:** infinitivo ou imperativo formal: "Criar grupo", "Renomear grupo", "Mover para o grupo", "Fechar janela", "Aplicar o tema às bordas das janelas", "Sair".
 
-Menus de outros programas (bandeja, clique direito, menu de sistema) e a barra de menus clássica ("Arquivo  Editar…") seguem as mesmas regras de item, cor e moldura. A barra instala ganchos globais e a `barra_menus.dll` faz o trabalho dentro de cada programa: modo claro ou escuro do uxtheme (`SetPreferredAppMode`), itens convertidos em desenho próprio só enquanto o menu está aberto, e a faixa da barra de menus pintada pelas mensagens `WM_UAHDRAWMENU`/`WM_UAHDRAWMENUITEM`. Menus que o próprio programa desenha (os do Explorer, por exemplo) ficam só no modo escuro; programas de 32 bits e os que rodam como administrador ficam de fora.
+Menus de outros programas (bandeja, clique direito, menu de sistema) e a barra de menus clássica ("Arquivo  Editar…") seguem as mesmas regras de item, cor e moldura. A barra instala ganchos globais e a `barra_menus.dll` faz o trabalho dentro de cada programa: modo claro ou escuro do uxtheme (`SetPreferredAppMode`), itens convertidos em desenho próprio só enquanto o menu está aberto, e a faixa da barra de menus pintada pelas mensagens `WM_UAHDRAWMENU`/`WM_UAHDRAWMENUITEM`. Menus que o próprio programa desenha (os do Explorer, por exemplo) ficam só no modo escuro. Programas de 32 bits ficam de fora; os que rodam como administrador também, quando a barra não roda como administrador.
+
+### Controles das outras janelas
+Controles Win32 dos outros programas planos e de canto vivo, nos papéis do tema, como nos mods Translucent Windows e Win32 UI Modernizer do Windhawk. A `barra_menus.dll` desvia, dentro de cada programa, as funções em que os controles escolhem cor e se desenham.
+- **Cores do sistema** (`GetSysColor`, `GetSysColorBrush`, `FillRect` com pincel de índice): janela, botão, menu e barras de título em `fundo`; texto em `texto`; texto desabilitado e bordas 3D em `mudo`; seleção em `selecao`; link em `destaque`. Vale só dentro do programa, sem `SetSysColors`.
+- **Fundo e texto padrão de janelas e diálogos** (`WM_CTLCOLOR*`, `WM_ERASEBKGND`): troca só o que veio do padrão do Windows; cores escolhidas pelo programa ficam. A textura das abas nos diálogos de propriedades sai.
+- **Botão:** `fundo-claro` com borda `mudo`; sob o mouse `selecao`; apertado `selecao` com borda `destaque`; botão padrão com borda `destaque`.
+- **Caixa de seleção e opção:** caixa com borda `texto-apagado` (`texto` sob o mouse); marcada, preenchida em `destaque` com o glifo `f00c` em `fundo`; opção com os glifos `f10c` e `f192`.
+- **Campo e combo:** `fundo` com borda `mudo`, `destaque` no foco; seta da lista no glifo `f107`.
+- **Abas:** `fundo` com borda `mudo`; a escolhida sem a linha de baixo e com 2 px de `destaque` em cima.
+- **Lista, árvore e cabeçalho:** `fundo-claro` sob o mouse, `selecao` no item escolhido; setas da árvore e de ordenação em glifos `texto-apagado`.
+- **Barra de rolagem:** trilho `fundo`, polegar `mudo` numa faixa de metade da largura (`texto-apagado` sob o mouse, `texto` arrastando), setas em glifos.
+- **Progresso:** trilho `fundo-claro`, preenchimento `destaque`, `vermelho` no erro e `texto-apagado` em pausa, sem o brilho que corre por cima.
+- **Dica:** como a da barra, `fundo` com borda de 2 px em `destaque`.
+- **Caixa de tarefa e de mensagem:** área principal em `fundo`; faixa de baixo, com os botões, em `fundo-claro` com uma linha `mudo` em cima.
+
+Trocar o tema refaz as janelas abertas (`WM_SYSCOLORCHANGE`, `WM_THEMECHANGED` e redesenho). Programas sem os controles comuns versão 6 (sem manifesto) desenham os botões no estilo clássico, com bordas 3D que ainda saem nas cores do Windows.
 
 ### Caixa de renomear grupo
 Campo de texto do Win32 sobre o cabeçalho do cartão: CaskaydiaMono Nerd Font 12 px em negrito, `texto-forte` sobre `fundo-claro`.

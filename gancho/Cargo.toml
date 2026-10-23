@@ -1,0 +1,15 @@
+[package]
+name = "barra-gancho"
+version = "0.1.0"
+edition = "2021"
+description = "DLL dos ganchos globais da barra: carrega a barra_menus.dll da versão atual em cada programa"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+windows = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_System_LibraryLoader",
+    "Win32_UI_WindowsAndMessaging",
+] }

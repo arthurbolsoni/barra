@@ -2034,6 +2034,7 @@ fn main() -> Result<()> {
         std::panic::set_hook(Box::new(|_| {
             grupos::trazer_todas_de_volta();
             sistema::mostrar_barra_windows();
+            menus_externos::desligar();
             molduras::restaurar();
             cores_do_windows::restaurar();
         }));
