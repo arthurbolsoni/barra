@@ -233,9 +233,21 @@ pub struct Gfx {
     d2d: ID2D1Factory,
     dw: IDWriteFactory,
     wic: IWICImagingFactory,
-    rt: ID2D1DCRenderTarget,
+    /// Alvo em uso: o do DC (barra, painéis) ou, durante a pintura dela, o da visão geral.
+    rt: ID2D1RenderTarget,
+    dc_rt: ID2D1DCRenderTarget,
+    /// Ícones já convertidos para o alvo em uso (cada alvo tem os seus).
     icones: HashMap<isize, ID2D1Bitmap>,
+    visao: Option<AlvoJanela>,
     pub tema: &'static Tema,
+}
+
+/// Alvo direto na janela da visão geral: desenha na GPU e apresenta sem esperar a tela. O do DC
+/// leva 20–30 ms para a tela inteira (desenha e copia para o GDI); este, poucos ms.
+struct AlvoJanela {
+    janela: HWND,
+    rt: ID2D1HwndRenderTarget,
+    icones: HashMap<isize, ID2D1Bitmap>,
 }
 
 impl Gfx {
@@ -244,8 +256,8 @@ impl Gfx {
             let d2d: ID2D1Factory = D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, None)?;
             let dw: IDWriteFactory = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED)?;
             let wic: IWICImagingFactory = CoCreateInstance(&CLSID_WICImagingFactory, None, CLSCTX_INPROC_SERVER)?;
-            let rt = Self::alvo(&d2d)?;
-            Ok(Self { d2d, dw, wic, rt, icones: HashMap::new(), tema })
+            let dc_rt = Self::alvo(&d2d)?;
+            Ok(Self { d2d, dw, wic, rt: dc_rt.clone().into(), dc_rt, icones: HashMap::new(), visao: None, tema })
         }
     }
 
@@ -365,7 +377,7 @@ impl Gfx {
     /// Desenha só no retângulo `r` do DC; dentro de `f` a origem é o canto de `r`.
     fn no_dc_em<R>(&mut self, dc: HDC, r: RECT, f: impl FnOnce(&mut Self) -> Result<R>) -> Result<R> {
         unsafe {
-            self.rt.BindDC(dc, &r)?;
+            self.dc_rt.BindDC(dc, &r)?;
             self.rt.BeginDraw();
         }
         let r = f(self);
@@ -373,7 +385,8 @@ impl Gfx {
         if let Err(e) = fim {
             // dispositivo perdido: refaz o alvo e o cache de ícones na próxima pintura
             if e.code() == D2DERR_RECREATE_TARGET {
-                self.rt = Self::alvo(&self.d2d)?;
+                self.dc_rt = Self::alvo(&self.d2d)?;
+                self.rt = self.dc_rt.clone().into();
                 self.icones.clear();
             }
             return Err(e);
@@ -762,8 +775,46 @@ impl Gfx {
         })
     }
 
-    pub fn desenhar_visao(&mut self, dc: HDC, c: &CenaVisao) -> Result<()> {
-        self.no_dc(dc, c.w, c.h, |g| g.conteudo_visao(c))
+    pub fn desenhar_visao(&mut self, janela: HWND, c: &CenaVisao) -> Result<()> {
+        let tam = D2D_SIZE_U { width: c.w.max(1) as u32, height: c.h.max(1) as u32 };
+        if self.visao.as_ref().is_none_or(|v| v.janela != janela) {
+            let rt = unsafe {
+                self.d2d.CreateHwndRenderTarget(
+                    &D2D1_RENDER_TARGET_PROPERTIES {
+                        r#type: D2D1_RENDER_TARGET_TYPE_DEFAULT,
+                        pixelFormat: D2D1_PIXEL_FORMAT { format: DXGI_FORMAT_B8G8R8A8_UNORM, alphaMode: D2D1_ALPHA_MODE_IGNORE },
+                        dpiX: 96.0,
+                        dpiY: 96.0,
+                        ..Default::default()
+                    },
+                    &D2D1_HWND_RENDER_TARGET_PROPERTIES { hwnd: janela, pixelSize: tam, presentOptions: D2D1_PRESENT_OPTIONS_IMMEDIATELY },
+                )?
+            };
+            unsafe { rt.SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_GRAYSCALE) };
+            self.visao = Some(AlvoJanela { janela, rt, icones: HashMap::new() });
+        }
+        let Some(v) = self.visao.as_mut() else { return Ok(()) };
+        let atual = unsafe { v.rt.GetPixelSize() };
+        if (atual.width, atual.height) != (tam.width, tam.height) {
+            unsafe { v.rt.Resize(&tam)? };
+        }
+        let dc = std::mem::replace(&mut self.rt, v.rt.clone().into());
+        std::mem::swap(&mut self.icones, &mut v.icones);
+        unsafe { self.rt.BeginDraw() };
+        let r = self.conteudo_visao(c);
+        let fim = unsafe { self.rt.EndDraw(None, None) };
+        self.rt = dc;
+        if let Some(v) = self.visao.as_mut() {
+            std::mem::swap(&mut self.icones, &mut v.icones);
+        }
+        if let Err(e) = fim {
+            // dispositivo perdido: refaz o alvo na próxima pintura
+            if e.code() == D2DERR_RECREATE_TARGET {
+                self.visao = None;
+            }
+            return Err(e);
+        }
+        r
     }
 
     fn conteudo_visao(&mut self, c: &CenaVisao) -> Result<()> {

@@ -37,7 +37,7 @@ Abrem embaixo do ícone, no tema da barra, sem tirar o foco da janela em uso. Fe
 
 Abre com Alt+Tab, Win+Tab ou pelo menu da barra. Mostra todos os grupos ao mesmo tempo, com miniaturas ao vivo do DWM no lugar onde cada janela fica.
 
-- Alt+Tab: Tab anda pela ordem de uso (Shift volta); soltar o Alt vai para a janela escolhida. Toque rápido troca para a janela anterior sem mostrar nada.
+- Alt+Tab: Tab anda pela ordem de uso (Shift volta); soltar o Alt vai para a janela escolhida. A visão geral aparece já no primeiro Tab (o primeiro quadro sai em menos de 10 ms); toque rápido troca para a janela anterior.
 - Clique numa janela vai para ela; clique no cartão vai para o grupo; "Novo grupo" cria um.
 - Arrastar uma janela para outro cartão muda o grupo dela; para "Novo grupo", cria um grupo com ela.
 - Digitar filtra pelo título; setas andam entre as janelas; Enter abre; Esc fecha.

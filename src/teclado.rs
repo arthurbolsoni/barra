@@ -57,6 +57,10 @@ unsafe extern "system" fn gancho(code: i32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                 let win = apertada(VK_LWIN) || apertada(VK_RWIN);
                 if alt != win {
                     if alt && ALT_TAB.load(Ordering::Relaxed) {
+                        // aqui, não na barra: o Alt pode ser solto antes de a barra tratar o Tab
+                        if !VISAO_ABERTA.load(Ordering::Relaxed) {
+                            MODO_ALT.store(true, Ordering::Relaxed);
+                        }
                         postar(WM_ALT_TAB, apertada(VK_SHIFT) as usize);
                         return LRESULT(1);
                     }

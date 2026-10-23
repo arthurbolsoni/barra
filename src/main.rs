@@ -60,7 +60,6 @@ const MESES: [&str; 12] = [
     "janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro",
 ];
 const MENU_TEMA: usize = 200;
-const TIMER_ALT: usize = 2;
 const WM_MOUSELEAVE: u32 = 0x02A3;
 /// Preferência: Alt+Tab abre a visão geral (padrão: sim).
 const PREF_ALT_TAB: PCWSTR = w!("AltTab");
@@ -91,9 +90,6 @@ struct Estado {
     visao: visao::Visao,
     /// Janelas da mais recente para a mais antiga em foco (ordem do Alt+Tab).
     mru: Vec<isize>,
-    /// Alt+Tab apertado e ainda sem mostrar a visão geral (toque rápido só troca de janela).
-    alt_pendente: bool,
-    alt_indice: usize,
     alvos: Alvos,
     hover: Option<Alvo>,
     piscando: HashSet<isize>,
@@ -755,6 +751,8 @@ fn abrir_visao(modo_alt: bool, selecao: Option<isize>) {
     };
     MODO_ALT.store(modo_alt, Ordering::Relaxed);
     teclado::VISAO_ABERTA.store(true, Ordering::Relaxed);
+    // primeiro quadro já, sem esperar a mensagem de pintura passar pela fila
+    unsafe { _ = UpdateWindow(v) };
     forcar_primeiro_plano(v);
 }
 
@@ -1625,54 +1623,29 @@ unsafe fn proc_barra(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
         teclado::WM_ALT_TAB => {
             teclado::mascarar();
             let volta = wp.0 != 0;
-            _ = com(|st| {
-                if st.visao.aberta {
-                    andar(st, false, if volta { -1 } else { 1 });
-                } else if st.alt_pendente {
-                    let n = st.mru.len().max(1);
-                    st.alt_indice = if volta { (st.alt_indice + n - 1) % n } else { (st.alt_indice + 1) % n };
-                } else if !st.mru.is_empty() {
-                    st.alt_pendente = true;
-                    let n = st.mru.len();
-                    st.alt_indice = if volta { n - 1 } else { 1.min(n - 1) };
-                    MODO_ALT.store(true, Ordering::Relaxed);
-                    SetTimer(Some(h), TIMER_ALT, 160, None);
-                }
+            if com(|st| st.visao.aberta) == Some(true) {
+                _ = com(|st| andar(st, false, if volta { -1 } else { 1 }));
+                return LRESULT(0);
+            }
+            // a visão geral abre no primeiro Tab, com a janela de antes (ou a última, com Shift)
+            let sel = com(|st| {
+                let n = st.mru.len();
+                (n > 0).then(|| st.mru[if volta { n - 1 } else { 1.min(n - 1) }])
             });
-            LRESULT(0)
-        }
-        WM_TIMER if wp.0 == TIMER_ALT => {
-            _ = KillTimer(Some(h), TIMER_ALT);
-            // Alt ainda apertado: mostra a visão geral com a janela escolhida até aqui
-            if let Some(Some(sel)) = com(|st| {
-                let p = std::mem::take(&mut st.alt_pendente);
-                p.then(|| st.mru.get(st.alt_indice).copied()).flatten()
-            }) {
-                abrir_visao(true, Some(sel));
+            match sel {
+                Some(Some(sel)) => abrir_visao(true, Some(sel)),
+                _ => MODO_ALT.store(false, Ordering::Relaxed),
             }
             LRESULT(0)
         }
         teclado::WM_ALT_SOLTO => {
-            _ = KillTimer(Some(h), TIMER_ALT);
-            let rapido = com(|st| std::mem::take(&mut st.alt_pendente).then(|| st.mru.get(st.alt_indice).copied()).flatten());
-            match rapido {
-                // toque rápido: vai direto, sem mostrar nada
-                Some(Some(j)) => {
-                    MODO_ALT.store(false, Ordering::Relaxed);
-                    ir_janela(j);
-                }
-                _ => {
-                    if MODO_ALT.load(Ordering::Relaxed) && com(|st| st.visao.aberta) == Some(true) {
-                        escolher_selecao();
-                    }
-                    MODO_ALT.store(false, Ordering::Relaxed);
-                }
+            if MODO_ALT.load(Ordering::Relaxed) && com(|st| st.visao.aberta) == Some(true) {
+                escolher_selecao();
             }
+            MODO_ALT.store(false, Ordering::Relaxed);
             LRESULT(0)
         }
         teclado::WM_ESC_ALT => {
-            _ = KillTimer(Some(h), TIMER_ALT);
-            _ = com(|st| st.alt_pendente = false);
             fechar_visao(true);
             LRESULT(0)
         }
@@ -1759,12 +1732,12 @@ unsafe fn proc_visao(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
     match msg {
         WM_PAINT => {
             let mut ps = PAINTSTRUCT::default();
-            let dc = BeginPaint(h, &mut ps);
+            BeginPaint(h, &mut ps);
             let mut r = RECT::default();
             _ = GetClientRect(h, &mut r);
             _ = com(|st| {
                 let c = cena_visao(st, r.right, r.bottom);
-                _ = st.gfx.desenhar_visao(dc, &c);
+                _ = st.gfx.desenhar_visao(h, &c);
             });
             _ = EndPaint(h, &ps);
             LRESULT(0)
@@ -2089,8 +2062,6 @@ fn main() -> Result<()> {
                 grupos,
                 visao: visao::Visao { janela: visao_hwnd, ..Default::default() },
                 mru: atuais,
-                alt_pendente: false,
-                alt_indice: 0,
                 alvos: Vec::new(),
                 hover: None,
                 piscando: HashSet::new(),
