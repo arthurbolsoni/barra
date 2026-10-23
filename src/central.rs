@@ -5,6 +5,7 @@
 //! leitura dessas pastas, o que foi marcado como concluído (`acoes.jsonl`, lido de volta pelas
 //! fontes) e o estado da janela. O desenho é do `desenho::central`.
 
+use std::cell::Cell;
 use std::collections::HashSet;
 use std::io::Write;
 use std::path::PathBuf;
@@ -487,6 +488,11 @@ pub struct Central {
     pub alvos: Vec<(D2D_RECT_F, AlvoCentral)>,
     /// Janela em foco antes de abrir, para devolver ao fechar com Esc.
     pub anterior: isize,
+    /// Rolagem da coluna de pendências e prazos, em pixels sem escala.
+    pub rolagem: f32,
+    /// Área da lista rolável e rolagem máxima, gravadas a cada pintura.
+    pub lista: Cell<D2D_RECT_F>,
+    pub rolagem_max: Cell<f32>,
 }
 
 impl Default for Central {
@@ -505,6 +511,9 @@ impl Default for Central {
             hover: None,
             alvos: Vec::new(),
             anterior: 0,
+            rolagem: 0.0,
+            lista: Cell::new(D2D_RECT_F::default()),
+            rolagem_max: Cell::new(0.0),
         }
     }
 }
@@ -528,6 +537,16 @@ impl Central {
     pub fn passo(&mut self, n: i64) {
         let dias = if self.vista == Vista::Dia { n } else { n * 7 };
         self.ir_dia(self.dia + Duration::days(dias));
+    }
+
+    /// Rola a lista de pendências quando (x, y) está sobre ela; devolve se o cursor estava nela.
+    pub fn rolar(&mut self, x: f32, y: f32, delta: f32) -> bool {
+        let r = self.lista.get();
+        if !(x >= r.left && x < r.right && y >= r.top && y < r.bottom) {
+            return false;
+        }
+        self.rolagem = (self.rolagem - delta).clamp(0.0, self.rolagem_max.get());
+        true
     }
 
     pub fn alternar_fonte(&mut self, i: usize) {

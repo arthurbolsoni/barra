@@ -255,13 +255,15 @@ impl Gfx {
             }
             y += 26.0 * s;
             let linha = 18.0 * s;
-            let mut sobra = 0;
+            // daqui para baixo a coluna rola; os alvos fora da área visível são descartados no fim
+            let topo = y - 6.0 * s;
+            let area = ret(c1 + 1.0 * s, topo, c3, limite);
+            let n_alvos = alvos.len();
+            self.recortar(area);
+            y -= c.rolagem.min(c.rolagem_max.get()) * s;
+            let inicio = y;
             // sessões aguardando permissão
             for &i in &sessoes_perm {
-                if y + 2.0 * linha > limite {
-                    sobra += 1;
-                    continue;
-                }
                 let se = &d.sessoes[i];
                 self.glifo(G_ATENCAO, &fg, ret(xa - 4.0 * s, y, xa + 16.0 * s, y + linha), k(t.amarelo))?;
                 self.texto(&format!("Sessão em {} aguarda permissão", se.nome()), &f, ret(xa + 22.0 * s, y, xb - 60.0 * s, y + linha), k(t.texto_forte))?;
@@ -272,10 +274,6 @@ impl Gfx {
             }
             // fontes que oferecem execução e não rodaram hoje
             for &i in &sinteticas {
-                if y + 3.0 * linha > limite {
-                    sobra += 1;
-                    continue;
-                }
                 let fo = &d.fontes[i];
                 let ex = fo.executar.as_ref().map(|e| e.rotulo.clone()).unwrap_or_default();
                 self.glifo(fo.glifo, &fg, ret(xa - 4.0 * s, y, xa + 16.0 * s, y + linha), k(t.amarelo))?;
@@ -297,10 +295,6 @@ impl Gfx {
                 // o quadrado marca como concluída; o resto da linha abre o registro
                 let executa = !feita && p.executar.is_some();
                 let linhas = if executa { 3.0 } else { 2.0 };
-                if y + linhas * linha > limite {
-                    sobra += 1;
-                    continue;
-                }
                 let lin = ret(xa - 6.0 * s, y - 4.0 * s, xb + 6.0 * s, y + linhas * linha + 4.0 * s);
                 let tem_link = !p.link.is_empty();
                 if hover(AlvoCentral::Pendencia(i)) || (tem_link && hover(AlvoCentral::LinkPendencia(i))) {
@@ -349,13 +343,9 @@ impl Gfx {
                 self.texto("Nenhuma pendência.", &f, ret(xa, y, xb, y + linha), k(t.texto_escuro))?;
                 y += linha + 8.0 * s;
             }
-            if sobra > 0 {
-                self.texto(&format!("mais {sobra}"), &f, ret(xa + 22.0 * s, y, xb, y + linha), k(apagado))?;
-                y += linha + 8.0 * s;
-            }
 
             // prazos: os da fonte e os das pendências abertas, até 60 dias
-            if y + 60.0 * s < limite {
+            {
                 y += 6.0 * s;
                 self.preencher(ret(xa, y, xb, y + 1.0 * s), k(t.selecao))?;
                 y += 8.0 * s;
@@ -373,12 +363,7 @@ impl Gfx {
                 lista.retain(|(dt, _, _, _)| (*dt - hoje).num_days() <= 60);
                 lista.sort_by_key(|(dt, _, _, _)| *dt);
                 let alt = 24.0 * s;
-                let mut resto = 0;
                 for (dt, tit, fo, idx) in &lista {
-                    if y + alt > limite {
-                        resto += 1;
-                        continue;
-                    }
                     let r = ret(xa - 6.0 * s, y, xb + 6.0 * s, y + alt);
                     let tem_link = idx.is_some_and(|i| !d.prazos[i].link.is_empty());
                     if tem_link && hover(AlvoCentral::Prazo(idx.unwrap_or(0))) {
@@ -397,10 +382,37 @@ impl Gfx {
                 }
                 if lista.is_empty() {
                     self.texto("Nenhum prazo.", &f, ret(xa, y, xb, y + alt), k(t.texto_escuro))?;
-                } else if resto > 0 {
-                    self.texto(&format!("mais {resto}"), &f, ret(xa + 22.0 * s, y, xb, y + alt), k(apagado))?;
+                }
+                y += alt;
+            }
+            self.soltar();
+
+            // rolagem máxima e barra de posição
+            let visivel = limite - topo;
+            let conteudo = y + 8.0 * s - inicio + 6.0 * s;
+            let max = ((conteudo - visivel) / s).max(0.0);
+            c.lista.set(area);
+            c.rolagem_max.set(max);
+            if max > 0.0 {
+                let fr_vis = visivel / conteudo;
+                let alt_barra = (visivel * fr_vis).max(24.0 * s);
+                let pos = topo + (visivel - alt_barra) * (c.rolagem.min(max) / max);
+                self.preencher(ret(c3 - 5.0 * s, pos, c3 - 2.0 * s, pos + alt_barra), k(t.selecao))?;
+            }
+            // alvos cortados pela área visível; os que ficaram de fora saem
+            let mut i = n_alvos;
+            while i < alvos.len() {
+                let r = &mut alvos[i].0;
+                r.top = r.top.max(area.top);
+                r.bottom = r.bottom.min(area.bottom);
+                if r.bottom <= r.top {
+                    alvos.remove(i);
+                } else {
+                    i += 1;
                 }
             }
+        } else {
+            c.lista.set(D2D_RECT_F::default());
         }
 
         // ---------- mês, rotinas, sessões, fontes ----------

@@ -323,6 +323,15 @@ impl Gfx {
         }
     }
 
+    /// Limita o desenho a `r` até o `soltar` correspondente.
+    fn recortar(&self, r: D2D_RECT_F) {
+        unsafe { self.rt.PushAxisAlignedClip(&r, D2D1_ANTIALIAS_MODE_ALIASED) };
+    }
+
+    fn soltar(&self) {
+        unsafe { self.rt.PopAxisAlignedClip() };
+    }
+
     fn preencher(&self, r: D2D_RECT_F, c: D2D1_COLOR_F) -> Result<()> {
         unsafe { self.rt.FillRectangle(&r, &self.pincel(c)?) };
         Ok(())

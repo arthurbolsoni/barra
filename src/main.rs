@@ -754,6 +754,7 @@ fn abrir_central() {
         st.central.vista = central::Vista::Dia;
         st.central.ir_dia(hoje);
         st.central.filtro.clear();
+        st.central.rolagem = 0.0;
         st.central.hover = None;
         st.central.anterior = primeiro_plano();
         let s = st.escala;
@@ -944,8 +945,14 @@ unsafe fn proc_central(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
         }
         WM_MOUSEWHEEL => {
             let delta = ((wp.0 >> 16) & 0xFFFF) as i16;
+            // sobre as pendências rola a lista; no resto troca o dia
+            let mut pt = POINT { x: xy(lp).0, y: xy(lp).1 };
+            _ = ScreenToClient(h, &mut pt);
             _ = com(|st| {
-                st.central.passo(if delta > 0 { -1 } else { 1 });
+                if !st.central.rolar(pt.x as f32, pt.y as f32, delta as f32 * 0.5) {
+                    st.central.passo(if delta > 0 { -1 } else { 1 });
+                }
+                st.central.hover = st.central.alvo_em(pt.x as f32, pt.y as f32);
                 invalidar(h);
             });
             LRESULT(0)
