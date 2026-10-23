@@ -61,7 +61,7 @@ Cada fonte grava `%LOCALAPPDATA%\barra\central\<fonte>.json`; a barra relê a pa
 
 | Fonte | Quem grava |
 | --- | --- |
-| `agenda` | `barra-central`, a partir do Google Agenda |
+| `agenda` | `barra-central`, a partir do Google Agenda e da agenda do Outlook.com (iCal) |
 | `soul` | skill `rotinas` do soul (`D:\Desktop\soul`), no começo e no fim de cada execução |
 | `agentes` | `barra-central`, a partir das tarefas e execuções do claude-hooks (`~/.claude-hooks`) |
 | `claude` | hooks do Claude Code, um arquivo por sessão em `central\claude\` |
@@ -94,7 +94,8 @@ Formato de `<fonte>.json`:
 
 A barra copia `barra-central.exe` para `%LOCALAPPDATA%\barra\bin` e abre o serviço ao iniciar (sem janela, uma instância só). Quando o executável compilado muda, a barra encerra o serviço, troca a cópia e abre de novo.
 
-- Agenda: conta de serviço do Google (a mesma do soul, `%USERPROFILE%\.soul-google\sa.json`), escopo de leitura. A agenda precisa estar compartilhada com o e-mail da conta de serviço. Sincroniza a cada 5 minutos, de 14 dias atrás a 60 dias à frente, e também quando a central abre e a última sincronização tem mais de um minuto. Configuração em `%LOCALAPPDATA%\barra\agenda-config.json`: `{ "chave": "<sa.json>", "agendas": ["<id da agenda>"], "intervalo_min": 5 }`. Com erro, os eventos da última sincronização continuam e o erro aparece em "fontes".
+- Agenda: lida pelo endereço iCal de cada agenda (o "endereço secreto no formato iCal" do Google Agenda, o calendário publicado do Outlook.com), só leitura. Expande eventos recorrentes (`RRULE`, `EXDATE`, exceções por `RECURRENCE-ID`) e converte o fuso do `VTIMEZONE` para a hora local. Sincroniza a cada 5 minutos, de 14 dias atrás a 60 dias à frente, e também quando a central abre e a última sincronização tem mais de um minuto. Configuração em `%LOCALAPPDATA%\barra\agenda-config.json`: `{ "agendas": [{ "nome": "Google", "ical": "https://…" }], "intervalo_min": 5 }`; os endereços não vão para o log nem para as mensagens de erro. Agenda com erro fica com os eventos da última leitura e o erro aparece em "fontes".
+- `barra-central agenda [de] [ate]` lê as agendas na hora e imprime um evento JSON por linha (padrão: de hoje a 7 dias); a skill `agenda` do Claude Code usa esse comando.
 - Agentes: relê o claude-hooks a cada 30 segundos. Tarefa vira rotina (com `claude-hooks run <tarefa>`), execução dos últimos 14 dias vira execução, e a execução mais recente de cada tarefa que terminou com `acao_necessaria` vira pendência. Sem `~/.claude-hooks`, a fonte não aparece.
 - `barra-central hook`: chamado pelos hooks do Claude Code (`SessionStart`, `UserPromptSubmit`, `Notification`, `PostToolUse`, `Stop`, `SessionEnd` em `~/.claude/settings.json`) com o evento no stdin. Estados: `trabalhando`, `permissao`, `concluida`; `SessionEnd` apaga o arquivo da sessão.
 - `barra-central sair` encerra o serviço; `barra-central agentes` lê o claude-hooks uma vez. Registro em `%LOCALAPPDATA%\barra\central.log`.

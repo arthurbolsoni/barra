@@ -1,16 +1,18 @@
 //! Serviço da central da barra. Cada fonte da central grava um JSON em
 //! `%LOCALAPPDATA%\barra\central\`; a barra lê a pasta e desenha. Este programa cuida de duas:
 //!
-//! - `barra-central` (sem argumento): sincroniza o Google Agenda a cada poucos minutos
+//! - `barra-central` (sem argumento): sincroniza as agendas (iCal do Google e do Outlook) a cada poucos minutos
 //!   (`agenda.json`) e lê as tarefas do claude-hooks a cada 30 segundos (`agentes.json`). Fica
 //!   rodando; uma instância só. A barra abre o serviço ao iniciar.
 //! - `barra-central hook`: chamado pelos hooks do Claude Code com o evento no stdin; grava o
 //!   estado da sessão em `claude\<sessão>.json`.
+//! - `barra-central agenda [de] [ate]`: lê as agendas na hora e imprime os eventos (skill `agenda`).
 
 // programa de console: o shell dos hooks espera ele terminar (a barra abre o serviço sem janela)
 
 mod agenda;
 mod agentes;
+mod ical;
 mod claude;
 
 use std::io::Write;
@@ -53,6 +55,7 @@ fn main() {
         Some("hook") => claude::hook(),
         Some("sair") => agenda::pedir_saida(),
         Some("agentes") => agentes::sincronizar(),
+        Some("agenda") => agenda::consultar(&args[2..]),
         _ => agenda::servico(),
     }
 }

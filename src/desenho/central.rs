@@ -5,7 +5,7 @@
 use chrono::{Datelike, Duration, NaiveDate, NaiveDateTime, Timelike};
 
 use super::*;
-use crate::central::{inicio_semana, semana_iso, AlvoCentral, Central, Estado, EstadoSessao, Sel, Vista};
+use crate::central::{inicio_semana, rotulo_da_fonte, semana_iso, AlvoCentral, Central, Estado, EstadoSessao, Sel, Vista, FREQUENCIAS};
 
 const DIAS_C: [&str; 7] = ["dom", "seg", "ter", "qua", "qui", "sex", "sáb"];
 const INICIAIS: [&str; 7] = ["D", "S", "T", "Q", "Q", "S", "S"];
@@ -42,8 +42,8 @@ fn quando(d: NaiveDate, hoje: NaiveDate) -> (String, i64) {
         0 => "hoje".into(),
         1 => "amanhã".into(),
         2..=6 => format!("{} {}", DIAS_C[dia_semana(d)], d.day()),
-        _ if d.year() == hoje.year() => format!("{}/{}", d.day(), d.month()),
-        _ => format!("{}/{}/{}", d.day(), d.month(), d.year() % 100),
+        _ if d.year() == hoje.year() => format!("{:02}/{:02}", d.day(), d.month()),
+        _ => format!("{:02}/{:02}/{}", d.day(), d.month(), d.year()),
     };
     (s, n)
 }
@@ -53,7 +53,9 @@ fn hm(d: NaiveDateTime) -> String {
 }
 
 fn duracao(m: i64) -> String {
-    if m < 60 {
+    if m < 1 {
+        "menos de 1 min".into()
+    } else if m < 60 {
         format!("{m} min")
     } else if m % 60 == 0 {
         format!("{}h", m / 60)
@@ -160,7 +162,7 @@ impl Gfx {
         // fontes, da direita para a esquerda
         let mut xd = w - 16.0 * s;
         for (i, fo) in d.fontes.iter().enumerate().rev() {
-            let rotulo_f = format!("{}  {}", fo.glifo, fo.nome);
+            let rotulo_f = format!("{}  {}", fo.glifo, rotulo_da_fonte(&fo.nome));
             let lw = self.largura(&rotulo_f, &f)? + 16.0 * s;
             let r = ret(xd - lw, 10.0 * s, xd, 34.0 * s);
             let ligada = !c.ocultas.contains(&fo.nome);
@@ -245,14 +247,40 @@ impl Gfx {
                 .filter(|&i| d.sessoes[i].estado == EstadoSessao::Permissao)
                 .filter(|_| d.fontes.iter().position(|f| f.nome == "claude").is_some_and(|i| c.visivel(i, "")))
                 .collect();
-            let mut pend: Vec<usize> = (0..d.pendencias.len()).filter(|&i| c.visivel(d.pendencias[i].fonte, &d.pendencias[i].titulo)).collect();
-            // por prazo; a concluída fica no lugar (riscada), para a lista não mudar embaixo do cursor
+            // na aba de abertas, a concluída só aparece (riscada) se foi marcada com a central aberta,
+            // para a lista não mudar embaixo do cursor
+            let recem = |p: &crate::central::Pendencia| d.fontes.get(p.fonte).is_some_and(|f| c.recem.contains(&(f.nome.clone(), p.id.clone())));
+            let mut pend: Vec<usize> = (0..d.pendencias.len())
+                .filter(|&i| c.visivel(d.pendencias[i].fonte, &d.pendencias[i].titulo))
+                .filter(|&i| !d.concluida(&d.pendencias[i]) || recem(&d.pendencias[i]))
+                .collect();
             pend.sort_by_key(|&i| d.pendencias[i].prazo.unwrap_or(NaiveDate::MAX));
             let abertas = pend.iter().filter(|&&i| !d.concluida(&d.pendencias[i])).count() + sinteticas.len() + sessoes_perm.len();
+            let hist: Vec<usize> = (0..d.historico.len())
+                .filter(|&i| {
+                    let h = &d.historico[i];
+                    let fonte_ok = d.fontes.iter().position(|f| f.nome == h.fonte).map_or(true, |fi| !c.ocultas.contains(&d.fontes[fi].nome));
+                    fonte_ok && (c.filtro.is_empty() || h.titulo.to_lowercase().contains(&c.filtro.to_lowercase()))
+                })
+                .collect();
             self.texto("Pendências", &fb, ret(xa, y, xb, y + 20.0 * s), k(t.texto_forte))?;
-            if abertas > 0 {
-                self.texto(&format!("{abertas} em aberto"), &fr, ret(xa, y, xb, y + 20.0 * s), k(apagado))?;
+            // abas, da direita para a esquerda
+            let mut xd = xb;
+            for (conc, nome, n) in [(true, "concluídas", hist.len()), (false, "em aberto", abertas)] {
+                let rot_aba = format!("{nome} {n}");
+                let sim = c.aba_concluidas == conc;
+                let lw = self.largura(&rot_aba, &f)? + 12.0 * s;
+                let r = ret(xd - lw, y - 2.0 * s, xd, y + 22.0 * s);
+                let al = AlvoCentral::AbaPendencias(conc);
+                if sim {
+                    self.preencher(ret(r.left, r.bottom - 2.0 * s, r.right, r.bottom), k(t.destaque))?;
+                }
+                let tinta = if sim { t.destaque } else if hover(al) { t.texto } else { apagado };
+                self.texto(&rot_aba, if sim { &fcb } else { &fc }, r, k(tinta))?;
+                alvos.push((r, al));
+                xd = r.left - 4.0 * s;
             }
+            let (sessoes_perm, sinteticas, pend) = if c.aba_concluidas { (Vec::new(), Vec::new(), Vec::new()) } else { (sessoes_perm, sinteticas, pend) };
             y += 26.0 * s;
             let linha = 18.0 * s;
             // daqui para baixo a coluna rola; os alvos fora da área visível são descartados no fim
@@ -277,7 +305,7 @@ impl Gfx {
                 let fo = &d.fontes[i];
                 let ex = fo.executar.as_ref().map(|e| e.rotulo.clone()).unwrap_or_default();
                 self.glifo(fo.glifo, &fg, ret(xa - 4.0 * s, y, xa + 16.0 * s, y + linha), k(t.amarelo))?;
-                self.texto(&format!("Rotinas do {} sem execução hoje", fo.nome), &f, ret(xa + 22.0 * s, y, xb - 60.0 * s, y + linha), k(t.texto_forte))?;
+                self.texto(&format!("Rotinas do {} sem execução hoje", rotulo_da_fonte(&fo.nome)), &f, ret(xa + 22.0 * s, y, xb - 60.0 * s, y + linha), k(t.texto_forte))?;
                 self.texto("hoje", &fr, ret(xa, y, xb, y + linha), k(t.amarelo))?;
                 self.texto(&fo.descricao, &f, ret(xa + 22.0 * s, y + linha, xb, y + 2.0 * linha), k(apagado))?;
                 let lw = self.largura(&ex, &f)? + 4.0 * s;
@@ -339,13 +367,43 @@ impl Gfx {
                 alvos.push((lin, if tem_link { AlvoCentral::LinkPendencia(i) } else { AlvoCentral::Pendencia(i) }));
                 y += linhas * linha + 12.0 * s;
             }
-            if abertas == 0 && pend.is_empty() {
+            if !c.aba_concluidas && abertas == 0 && pend.is_empty() {
                 self.texto("Nenhuma pendência.", &f, ret(xa, y, xb, y + linha), k(t.texto_escuro))?;
                 y += linha + 8.0 * s;
             }
+            // concluídas: o quadrado reabre; o resto da linha abre o registro
+            if c.aba_concluidas {
+                for &i in &hist {
+                    let h = &d.historico[i];
+                    let lin = ret(xa - 6.0 * s, y - 4.0 * s, xb + 6.0 * s, y + 2.0 * linha + 4.0 * s);
+                    let tem_link = !h.link.is_empty();
+                    if hover(AlvoCentral::Reabrir(i)) || (tem_link && hover(AlvoCentral::LinkConcluida(i))) {
+                        self.preencher(lin, k(t.fundo_claro))?;
+                    }
+                    let q = 12.0 * s;
+                    let cx = ret(xa, y + (linha - q) / 2.0, xa + q, y + (linha + q) / 2.0);
+                    self.preencher(cx, k(if hover(AlvoCentral::Reabrir(i)) { apagado } else { t.verde }))?;
+                    let dia = if h.quando.date() == hoje { hm(h.quando) } else { format!("{:02}/{:02}", h.quando.day(), h.quando.month()) };
+                    let ld = self.largura(&dia, &f)?;
+                    self.texto(&h.titulo, &f, ret(xa + 22.0 * s, y, xb - ld - 14.0 * s, y + linha), k(t.texto))?;
+                    self.texto(&dia, &fr, ret(xa, y, xb, y + linha), k(apagado))?;
+                    let fi = d.fontes.iter().position(|f| f.nome == h.fonte);
+                    let g = fi.map(|fi| d.fontes[fi].glifo).unwrap_or(crate::central::G_FONTE);
+                    self.texto(&format!("{g}  {}", h.origem), &f, ret(xa + 22.0 * s, y + linha, xb, y + 2.0 * linha), k(apagado))?;
+                    alvos.push((ret(lin.left, lin.top, xa + 18.0 * s, lin.bottom), AlvoCentral::Reabrir(i)));
+                    if tem_link {
+                        alvos.push((lin, AlvoCentral::LinkConcluida(i)));
+                    }
+                    y += 2.0 * linha + 12.0 * s;
+                }
+                if hist.is_empty() {
+                    self.texto("Nenhuma pendência concluída nos últimos 30 dias.", &f, ret(xa, y, xb, y + linha), k(t.texto_escuro))?;
+                    y += linha + 8.0 * s;
+                }
+            }
 
             // prazos: os da fonte e os das pendências abertas, até 60 dias
-            {
+            if !c.aba_concluidas {
                 y += 6.0 * s;
                 self.preencher(ret(xa, y, xb, y + 1.0 * s), k(t.selecao))?;
                 y += 8.0 * s;
@@ -474,7 +532,9 @@ impl Gfx {
         y += alt_dia * 6.0 + 10.0 * s;
 
         // rotinas
-        let rot: Vec<usize> = (0..d.rotinas.len()).filter(|&i| c.visivel(d.rotinas[i].fonte, &d.rotinas[i].titulo)).collect();
+        let mut rot: Vec<usize> = (0..d.rotinas.len()).filter(|&i| c.visivel(d.rotinas[i].fonte, &d.rotinas[i].titulo)).collect();
+        // agrupadas por frequência: diárias, semanais, mensais, anuais, outras
+        rot.sort_by_key(|&i| d.rotinas[i].frequencia());
         let linha = 18.0 * s;
         if !rot.is_empty() && y + 3.0 * linha < limite {
             self.preencher(ret(xa, y, xb, y + 1.0 * s), k(t.selecao))?;
@@ -488,11 +548,19 @@ impl Gfx {
             }
             y += linha + 6.0 * s;
             let mut resto = 0;
+            let mut grupo = usize::MAX;
             for &i in &rot {
                 let ro = &d.rotinas[i];
-                if y + 2.0 * linha > limite {
+                let fq = ro.frequencia();
+                let titulo_grupo = if fq != grupo { linha + 2.0 * s } else { 0.0 };
+                if y + titulo_grupo + 2.0 * linha > limite {
                     resto += 1;
                     continue;
+                }
+                if fq != grupo {
+                    grupo = fq;
+                    self.texto(FREQUENCIAS[fq], &fb, ret(xa, y, xb, y + linha), k(apagado))?;
+                    y += titulo_grupo;
                 }
                 let est = ro.ultima.map(|(_, e)| e).unwrap_or(Estado::Agendada);
                 self.glifo(est.glifo(), &fg, ret(xa - 4.0 * s, y, xa + 14.0 * s, y + linha), k(tinta_estado(est)))?;
@@ -500,8 +568,9 @@ impl Gfx {
                 let lp = if prox.is_empty() { 0.0 } else { self.largura(&prox, &f)? + 10.0 * s };
                 self.texto(&ro.titulo, &f, ret(xa + 20.0 * s, y, xb - lp, y + linha), k(t.texto))?;
                 self.texto(&prox, &fr, ret(xa, y, xb, y + linha), k(apagado))?;
-                let fo = d.fontes.get(ro.fonte).map(|f| f.nome.as_str()).unwrap_or("");
-                let sub = if ro.quando.is_empty() { format!("{}  {fo}", fonte_g(ro.fonte)) } else { format!("{}  {fo} · {}", fonte_g(ro.fonte), ro.quando) };
+                let fo = d.fontes.get(ro.fonte).map(|f| rotulo_da_fonte(&f.nome)).unwrap_or_default();
+                let dq = ro.detalhe_quando();
+                let sub = if dq.is_empty() { format!("{}  {fo}", fonte_g(ro.fonte)) } else { format!("{}  {fo} · {dq}", fonte_g(ro.fonte)) };
                 let mut fim_sub = xb;
                 if let Some(ex) = &ro.executar {
                     let lw = self.largura(&ex.rotulo, &f)? + 4.0 * s;

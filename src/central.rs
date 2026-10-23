@@ -126,6 +126,18 @@ pub struct Pendencia {
     pub executar: Option<Executar>,
 }
 
+/// Pendência marcada como concluída na central, guardada em `concluidas.jsonl` para continuar
+/// na aba de concluídas depois que a fonte a tira do arquivo dela.
+#[derive(Clone)]
+pub struct Concluida {
+    pub fonte: String,
+    pub id: String,
+    pub titulo: String,
+    pub origem: String,
+    pub link: String,
+    pub quando: NaiveDateTime,
+}
+
 pub struct Prazo {
     pub fonte: usize,
     pub titulo: String,
@@ -140,6 +152,48 @@ pub struct Rotina {
     pub ultima: Option<(NaiveDate, Estado)>,
     pub proxima: Option<NaiveDate>,
     pub executar: Option<Executar>,
+}
+
+/// Grupos de rotina na central, na ordem em que aparecem.
+pub const FREQUENCIAS: [&str; 5] = ["diárias", "semanais", "mensais", "anuais", "outras"];
+
+impl Rotina {
+    /// Índice em `FREQUENCIAS`, pelo texto de `quando` ("diária", "mensal, dia 10")
+    /// ou pela expressão cron do claude-hooks ("cron 0 8 * * 1-5").
+    pub fn frequencia(&self) -> usize {
+        let q = self.quando.to_lowercase();
+        for (i, p) in ["diári", "semana", "mensa", "anua"].iter().enumerate() {
+            if q.starts_with(p) {
+                return i;
+            }
+        }
+        if let Some(cron) = q.strip_prefix("cron ") {
+            let c: Vec<&str> = cron.split(" · ").next().unwrap_or("").split_whitespace().collect();
+            if c.len() >= 5 {
+                let livre = |x: &str| x == "*" || x == "?";
+                return match (livre(c[2]), livre(c[3]), livre(c[4])) {
+                    (true, true, true) => 0,
+                    (true, true, false) => if c[4] == "1-5" || c[4] == "mon-fri" { 0 } else { 1 },
+                    (false, true, _) => 2,
+                    (false, false, _) => 3,
+                    _ => 4,
+                };
+            }
+        }
+        4
+    }
+
+    /// `quando` sem a palavra do grupo ("mensal, dia 10" → "dia 10").
+    pub fn detalhe_quando(&self) -> &str {
+        let q = self.quando.as_str();
+        let l = q.to_lowercase();
+        for p in ["diária", "diario", "diário", "semanal", "mensal", "anual"] {
+            if l.starts_with(p) {
+                return q[p.len()..].trim_start_matches([',', ' ']);
+            }
+        }
+        q
+    }
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -175,6 +229,8 @@ pub struct Dados {
     pub sessoes: Vec<Sessao>,
     /// (fonte, id) marcados como concluídos na central.
     pub concluidas: HashSet<(String, String)>,
+    /// Concluídas dos últimos 30 dias, mais recentes primeiro.
+    pub historico: Vec<Concluida>,
     carimbo: u64,
 }
 
@@ -199,6 +255,28 @@ fn data(v: &Value) -> Option<NaiveDate> {
 
 fn texto(v: &Value) -> String {
     v.as_str().unwrap_or("").trim().to_string()
+}
+
+/// Nome da fonte para a tela.
+pub fn rotulo_da_fonte(nome: &str) -> String {
+    match nome {
+        "agenda" => "Agenda".into(),
+        "soul" => "Soul".into(),
+        "agentes" => "claude-hooks".into(),
+        "claude" => "Claude Code".into(),
+        outro => outro.to_string(),
+    }
+}
+
+/// Tira de um texto "a · b · c" as partes que são caminho de arquivo ("notas/rotinas.md",
+/// "D:\Desktop\soul"): na tela fica só o fato.
+fn sem_caminho(s: &str) -> String {
+    let caminho = |p: &str| {
+        let p = p.trim();
+        !p.contains(' ') && (p.contains('/') || p.contains('\\') || p.ends_with(".md") || p.ends_with(".json"))
+            || p.len() > 2 && p.as_bytes()[1] == b':' && p.contains('\\')
+    };
+    s.split(" · ").filter(|p| !caminho(p)).map(str::trim).filter(|p| !p.is_empty()).collect::<Vec<_>>().join(" · ")
 }
 
 fn glifo_da_fonte(nome: &str) -> &'static str {
@@ -278,7 +356,7 @@ impl Dados {
         for (i, (nome, v)) in fontes.iter().enumerate() {
             d.fontes.push(Fonte {
                 nome: nome.clone(),
-                descricao: v["descricao"].as_str().map(String::from).unwrap_or_else(|| nome.clone()),
+                descricao: v["descricao"].as_str().map(sem_caminho).filter(|d| !d.is_empty()).unwrap_or_else(|| rotulo_da_fonte(nome)),
                 glifo: glifo_da_fonte(nome),
                 atualizado: v["atualizado"].as_str().and_then(data_hora).map(|(d, _)| d),
                 erro: v["erro"].as_str().map(String::from).filter(|e| !e.is_empty()),
@@ -295,6 +373,24 @@ impl Dados {
         d.execucoes.sort_by_key(|e| e.inicio);
         d.prazos.sort_by_key(|p| p.data);
         d.concluidas = ler_concluidas();
+        d.historico = ler_historico();
+        // concluídas que só estão no acoes.jsonl (marcadas antes do histórico existir)
+        let marcadas = quando_marcadas();
+        for p in &d.pendencias {
+            let Some(f) = d.fontes.get(p.fonte) else { continue };
+            let chave = (f.nome.clone(), p.id.clone());
+            if d.concluidas.contains(&chave) && !d.historico.iter().any(|h| h.fonte == chave.0 && h.id == chave.1) {
+                let quando = marcadas.get(&chave).copied().unwrap_or_else(|| Local::now().naive_local());
+                d.historico.push(Concluida {
+                    fonte: chave.0,
+                    id: chave.1,
+                    titulo: p.titulo.clone(),
+                    origem: if p.origem.is_empty() { f.descricao.clone() } else { p.origem.clone() },
+                    link: p.link.clone(),
+                    quando,
+                });
+            }
+        }
         d
     }
 
@@ -338,7 +434,7 @@ impl Dados {
                 fonte,
                 id: it["id"].as_str().map(String::from).unwrap_or_else(|| titulo.clone()),
                 titulo,
-                origem: texto(&it["origem"]),
+                origem: sem_caminho(&texto(&it["origem"])),
                 prazo: data(&it["prazo"]),
                 link: texto(&it["link"]),
                 executar,
@@ -368,25 +464,57 @@ impl Dados {
     pub fn alternar(&mut self, i: usize) {
         let Some(p) = self.pendencias.get(i) else { return };
         let Some(f) = self.fontes.get(p.fonte) else { return };
-        let chave = (f.nome.clone(), p.id.clone());
-        let concluir = !self.concluidas.contains(&chave);
-        let linha = json!({
-            "quando": Local::now().to_rfc3339(),
-            "fonte": chave.0,
-            "id": chave.1,
-            "titulo": p.titulo,
-            "acao": if concluir { "concluir" } else { "reabrir" },
-        });
-        _ = std::fs::create_dir_all(pasta());
-        if let Ok(mut a) = std::fs::OpenOptions::new().create(true).append(true).open(pasta().join("acoes.jsonl")) {
-            _ = writeln!(a, "{linha}");
+        let c = Concluida {
+            fonte: f.nome.clone(),
+            id: p.id.clone(),
+            titulo: p.titulo.clone(),
+            origem: if p.origem.is_empty() { f.descricao.clone() } else { p.origem.clone() },
+            link: p.link.clone(),
+            quando: Local::now().naive_local(),
+        };
+        let concluir = !self.concluidas.contains(&(c.fonte.clone(), c.id.clone()));
+        self.registrar(c, concluir);
+    }
+
+    /// Reabre uma concluída da aba de concluídas (índice em `historico`).
+    pub fn reabrir(&mut self, i: usize) {
+        if let Some(c) = self.historico.get(i).cloned() {
+            self.registrar(c, false);
         }
+    }
+
+    fn registrar(&mut self, c: Concluida, concluir: bool) {
+        let acao = if concluir { "concluir" } else { "reabrir" };
+        let agora = Local::now().to_rfc3339();
+        let linha = json!({ "quando": agora, "fonte": c.fonte, "id": c.id, "titulo": c.titulo, "acao": acao });
+        let hist = json!({ "quando": agora, "fonte": c.fonte, "id": c.id, "titulo": c.titulo, "origem": c.origem, "link": c.link, "acao": acao });
+        _ = std::fs::create_dir_all(pasta());
+        for (arq, l) in [("acoes.jsonl", linha), ("concluidas.jsonl", hist)] {
+            if let Ok(mut a) = std::fs::OpenOptions::new().create(true).append(true).open(pasta().join(arq)) {
+                _ = writeln!(a, "{l}");
+            }
+        }
+        let chave = (c.fonte.clone(), c.id.clone());
+        self.historico.retain(|h| (h.fonte.as_str(), h.id.as_str()) != (chave.0.as_str(), chave.1.as_str()));
         if concluir {
             self.concluidas.insert(chave);
+            self.historico.insert(0, c);
         } else {
             self.concluidas.remove(&chave);
         }
     }
+}
+
+/// Momento da última marcação de cada (fonte, id) no `acoes.jsonl`.
+fn quando_marcadas() -> std::collections::HashMap<(String, String), NaiveDateTime> {
+    let mut m = std::collections::HashMap::new();
+    let Ok(t) = std::fs::read_to_string(pasta().join("acoes.jsonl")) else { return m };
+    for v in t.lines().filter_map(|l| serde_json::from_str::<Value>(l).ok()) {
+        if let Some((q, _)) = v["quando"].as_str().and_then(data_hora) {
+            m.insert((texto(&v["fonte"]), texto(&v["id"])), q);
+        }
+    }
+    m
 }
 
 fn ler_concluidas() -> HashSet<(String, String)> {
@@ -401,6 +529,23 @@ fn ler_concluidas() -> HashSet<(String, String)> {
         }
     }
     s
+}
+
+/// `concluidas.jsonl`: para cada (fonte, id) vale a última linha; reaberta sai.
+fn ler_historico() -> Vec<Concluida> {
+    let limite = Local::now().naive_local() - Duration::days(30);
+    let mut v: Vec<Concluida> = Vec::new();
+    let Ok(t) = std::fs::read_to_string(pasta().join("concluidas.jsonl")) else { return v };
+    for l in t.lines().filter_map(|l| serde_json::from_str::<Value>(l).ok()) {
+        let (fonte, id) = (texto(&l["fonte"]), texto(&l["id"]));
+        v.retain(|c| !(c.fonte == fonte && c.id == id));
+        let Some((quando, _)) = l["quando"].as_str().and_then(data_hora) else { continue };
+        if l["acao"] == "concluir" && quando > limite {
+            v.push(Concluida { fonte, id, titulo: texto(&l["titulo"]), origem: texto(&l["origem"]), link: texto(&l["link"]), quando });
+        }
+    }
+    v.reverse();
+    v
 }
 
 /// Sessões das últimas 12 horas; concluídas, só as da última meia hora.
@@ -470,6 +615,10 @@ pub enum AlvoCentral {
     MesSeguinte,
     Dia(NaiveDate),
     Rotina(usize),
+    /// Aba das pendências: false = em aberto, true = concluídas.
+    AbaPendencias(bool),
+    Reabrir(usize),
+    LinkConcluida(usize),
 }
 
 pub struct Central {
@@ -493,6 +642,11 @@ pub struct Central {
     /// Área da lista rolável e rolagem máxima, gravadas a cada pintura.
     pub lista: Cell<D2D_RECT_F>,
     pub rolagem_max: Cell<f32>,
+    /// Aba das pendências mostrando as concluídas.
+    pub aba_concluidas: bool,
+    /// (fonte, id) marcados desde que a central abriu: seguem riscados na aba de abertas,
+    /// para a lista não mudar embaixo do cursor.
+    pub recem: HashSet<(String, String)>,
 }
 
 impl Default for Central {
@@ -514,6 +668,8 @@ impl Default for Central {
             rolagem: 0.0,
             lista: Cell::new(D2D_RECT_F::default()),
             rolagem_max: Cell::new(0.0),
+            aba_concluidas: false,
+            recem: HashSet::new(),
         }
     }
 }

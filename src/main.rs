@@ -755,6 +755,8 @@ fn abrir_central() {
         st.central.ir_dia(hoje);
         st.central.filtro.clear();
         st.central.rolagem = 0.0;
+        st.central.aba_concluidas = false;
+        st.central.recem.clear();
         st.central.hover = None;
         st.central.anterior = primeiro_plano();
         let s = st.escala;
@@ -762,7 +764,8 @@ fn abrir_central() {
         let mut b = RECT::default();
         unsafe { _ = GetWindowRect(st.barra, &mut b) };
         let w = ((1560.0 * s) as i32).min(m.right - m.left - (24.0 * s) as i32);
-        let h = ((800.0 * s) as i32).min(m.bottom - b.bottom - (16.0 * s) as i32);
+        // da barra até a base do monitor
+        let h = m.bottom - b.bottom;
         // centrada embaixo do relógio
         let centro = st.alvos.iter().find(|(_, a)| *a == Alvo::Relogio).map(|(r, _)| b.left + ((r.left + r.right) / 2.0) as i32).unwrap_or((m.left + m.right) / 2);
         let x = (centro - w / 2).clamp(m.left, m.right - w);
@@ -862,9 +865,23 @@ fn clicar_central(a: central::AlvoCentral) {
             },
             A::FecharDetalhe => Depois::Nada,
             A::Pendencia(i) => {
+                if let Some(p) = c.dados.pendencias.get(i) {
+                    let nome = c.dados.fontes.get(p.fonte).map(|f| f.nome.clone()).unwrap_or_default();
+                    c.recem.insert((nome, p.id.clone()));
+                }
                 c.dados.alternar(i);
                 Depois::Nada
             }
+            A::AbaPendencias(b) => {
+                c.aba_concluidas = b;
+                c.rolagem = 0.0;
+                Depois::Nada
+            }
+            A::Reabrir(i) => {
+                c.dados.reabrir(i);
+                Depois::Nada
+            }
+            A::LinkConcluida(i) => c.dados.historico.get(i).map(|h| Depois::Abrir(h.link.clone())).unwrap_or(Depois::Nada),
             A::LinkPendencia(i) => d.pendencias.get(i).map(|p| Depois::Abrir(p.link.clone())).unwrap_or(Depois::Nada),
             A::ExecutarPendencia(i) => d.pendencias.get(i).and_then(|p| p.executar.clone()).map(Depois::Executar).unwrap_or(Depois::Nada),
             A::ExecutarFonte(i) => d.fontes.get(i).and_then(|f| f.executar.clone()).map(Depois::Executar).unwrap_or(Depois::Nada),
