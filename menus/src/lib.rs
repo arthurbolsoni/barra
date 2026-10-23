@@ -1107,9 +1107,10 @@ unsafe fn botoes_de(dono: HWND) -> Vec<Botao> {
 }
 
 /// Janela com botão na barra (o mesmo critério da barra, que é onde as molduras são pintadas)
-/// e com a barra de título desenhada pelo Windows: a área do programa começa abaixo dela.
-/// Navegadores, Windows Terminal e Explorer estendem a área do programa até o alto e desenham
-/// os próprios botões; ficam como estão.
+/// e com os botões da barra de título desenhados pelo Windows: a área do programa começa abaixo
+/// da barra de título, ou sobe até o alto com os botões do DWM por cima (apps XAML como o
+/// Gerenciador de Tarefas e a Configurações). Navegadores e Windows Terminal estendem a área
+/// do programa e desenham os próprios botões; ficam como estão.
 unsafe fn titulo_do_windows(h: HWND) -> bool {
     if !IsWindowVisible(h).as_bool() || IsIconic(h).as_bool() || GetWindowTextLengthW(h) == 0 {
         return false;
@@ -1125,7 +1126,31 @@ unsafe fn titulo_do_windows(h: HWND) -> bool {
     if GetWindowRect(h, &mut j).is_err() || !ClientToScreen(h, &mut c).as_bool() {
         return false;
     }
-    c.y - j.top >= GetSystemMetricsForDpi(SM_CYCAPTION, dpi_de(h))
+    !estendida(h, &j, c) || botoes_do_dwm(h, &j)
+}
+
+/// A área do programa sobe até a barra de título (não sobra a altura de uma barra de título
+/// entre o alto da janela e a área do programa).
+unsafe fn estendida(h: HWND, j: &RECT, c: POINT) -> bool {
+    c.y - j.top < GetSystemMetricsForDpi(SM_CYCAPTION, dpi_de(h))
+}
+
+/// Limites dos botões do DWM, em coordenadas de tela. Sem o menu de sistema o DWM não os
+/// desenha e a largura fica zero, mas a borda direita e a altura continuam.
+unsafe fn limites_do_dwm(h: HWND, j: &RECT) -> Option<RECT> {
+    let mut b = RECT::default();
+    windows::Win32::Graphics::Dwm::DwmGetWindowAttribute(h, windows::Win32::Graphics::Dwm::DWMWA_CAPTION_BUTTON_BOUNDS, &mut b as *mut _ as *mut _, size_of::<RECT>() as u32).ok()?;
+    (b.bottom > b.top).then(|| RECT { left: j.left + b.left, top: j.top + b.top, right: j.left + b.right, bottom: j.top + b.bottom })
+}
+
+/// O DWM desenha os botões por cima da área do programa estendida: o ponto do Fechar é dele no
+/// teste de clique. Quem desenha os próprios botões não estende o vidro até lá, e o DWM recusa.
+unsafe fn botoes_do_dwm(h: HWND, j: &RECT) -> bool {
+    let Some(b) = limites_do_dwm(h, j).filter(|b| b.right > b.left) else { return false };
+    let (x, y) = (b.right - 4, (b.top + b.bottom) / 2);
+    let mut r = LRESULT(0);
+    let ponto = LPARAM(((y as u16 as isize) << 16) | x as u16 as isize);
+    windows::Win32::Graphics::Dwm::DwmDefWindowProc(h, WM_NCHITTEST, WPARAM(0), ponto, &mut r).as_bool() && r.0 == HTCLOSE as isize
 }
 
 /// Estado da janela dos botões, guardado no GWLP_USERDATA: botão sob o mouse, botão apertado
@@ -1261,6 +1286,13 @@ unsafe fn lugar_dos_botoes(dono: HWND, n: i32) -> Option<RECT> {
         return None;
     }
     let dpi = dpi_de(dono);
+    if estendida(dono, &j, c) {
+        // no lugar dos botões do DWM, da borda de cima até a altura deles
+        let b = limites_do_dwm(dono, &j)?;
+        let topo = if IsZoomed(dono).as_bool() { b.top } else { b.top.max(j.top + 1) };
+        let esquerda = b.right - n * px(CELULA, dpi);
+        return (b.bottom > topo && esquerda > j.left).then_some(RECT { left: esquerda, top: topo, right: b.right, bottom: b.bottom });
+    }
     let ex = GetWindowLongW(dono, GWL_EXSTYLE) as u32;
     let aba = if ex & WS_EX_CLIENTEDGE.0 != 0 { GetSystemMetricsForDpi(SM_CXEDGE, dpi) } else { 0 };
     let lado = c.x - j.left - aba;
