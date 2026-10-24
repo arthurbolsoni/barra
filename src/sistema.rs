@@ -3,7 +3,7 @@
 
 use std::ffi::c_void;
 
-use windows::core::{w, PCWSTR};
+use windows::core::{w, PCWSTR, PWSTR};
 use windows::Win32::Foundation::*;
 use windows::Win32::System::Registry::*;
 use windows::Win32::UI::Shell::*;
@@ -281,6 +281,33 @@ pub fn barra_windows_escondida() -> bool {
     ler(ESTADO_ANTES).is_some()
 }
 
+
+/// Navegador padrão (o que abre links https): executável e nome.
+pub fn navegador_padrao() -> Option<(String, String)> {
+    let ler = |o: ASSOCSTR| unsafe {
+        let mut n = 0u32;
+        _ = AssocQueryStringW(ASSOCF_IS_PROTOCOL, o, w!("https"), w!("open"), None, &mut n);
+        if n == 0 {
+            return None;
+        }
+        let mut b = vec![0u16; n as usize];
+        AssocQueryStringW(ASSOCF_IS_PROTOCOL, o, w!("https"), w!("open"), Some(PWSTR(b.as_mut_ptr())), &mut n).ok().ok()?;
+        let t = String::from_utf16_lossy(&b[..b.iter().position(|&c| c == 0).unwrap_or(b.len())]);
+        (!t.is_empty()).then_some(t)
+    };
+    let exe = ler(ASSOCSTR_EXECUTABLE)?;
+    let nome = ler(ASSOCSTR_FRIENDLYAPPNAME).unwrap_or_else(|| "navegador".into());
+    Some((exe, nome))
+}
+
+/// Abre uma janela nova do navegador padrão, sem elevação: quem abre é o Explorer (a barra roda
+/// como administrador, e o navegador aberto por ela também rodaria).
+pub fn abrir_navegador() {
+    match navegador_padrao() {
+        Some((exe, _)) => _ = std::process::Command::new("explorer.exe").arg(exe).spawn(),
+        None => abrir_uri(w!("https:")),
+    }
+}
 
 pub fn abrir_uri(uri: PCWSTR) {
     unsafe { ShellExecuteW(None, w!("open"), uri, PCWSTR::null(), PCWSTR::null(), SW_SHOWNORMAL) };
