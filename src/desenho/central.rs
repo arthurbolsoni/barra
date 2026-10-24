@@ -5,9 +5,9 @@
 use chrono::{Datelike, Duration, NaiveDate, NaiveDateTime, Timelike};
 
 use super::*;
-use crate::central::{inicio_semana, rotulo_da_fonte, semana_iso, AlvoCentral, Central, Estado, EstadoSessao, Sel, Vista, FREQUENCIAS};
+use crate::central::{cap, inicio_semana, rotulo_da_fonte, semana_iso, AlvoCentral, Central, Estado, EstadoSessao, Sel, Vista, FREQUENCIAS};
 
-const DIAS_C: [&str; 7] = ["dom", "seg", "ter", "qua", "qui", "sex", "sáb"];
+const DIAS_C: [&str; 7] = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
 const INICIAIS: [&str; 7] = ["D", "S", "T", "Q", "Q", "S", "S"];
 const G_ATENCAO: &str = "\u{f071}";
 
@@ -21,11 +21,6 @@ pub struct CenaCentral<'a> {
 
 pub type AlvosCentral = Vec<(D2D_RECT_F, AlvoCentral)>;
 
-fn cap(s: &str) -> String {
-    let mut c = s.chars();
-    c.next().map(|p| p.to_uppercase().chain(c).collect()).unwrap_or_default()
-}
-
 fn mes_nome(m: u32) -> &'static str {
     crate::MESES[(m as usize + 11) % 12]
 }
@@ -38,9 +33,9 @@ fn dia_semana(d: NaiveDate) -> usize {
 fn quando(d: NaiveDate, hoje: NaiveDate) -> (String, i64) {
     let n = (d - hoje).num_days();
     let s = match n {
-        _ if n < 0 => "atrasado".into(),
-        0 => "hoje".into(),
-        1 => "amanhã".into(),
+        _ if n < 0 => "Atrasado".into(),
+        0 => "Hoje".into(),
+        1 => "Amanhã".into(),
         2..=6 => format!("{} {}", DIAS_C[dia_semana(d)], d.day()),
         _ if d.year() == hoje.year() => format!("{:02}/{:02}", d.day(), d.month()),
         _ => format!("{:02}/{:02}/{}", d.day(), d.month(), d.year()),
@@ -54,7 +49,7 @@ fn hm(d: NaiveDateTime) -> String {
 
 fn duracao(m: i64) -> String {
     if m < 1 {
-        "menos de 1 min".into()
+        "Menos de 1 min".into()
     } else if m < 60 {
         format!("{m} min")
     } else if m % 60 == 0 {
@@ -117,7 +112,7 @@ impl Gfx {
         let (titulo, sub) = match c.vista {
             Vista::Dia => (
                 format!("{}, {} de {}", crate::DIAS[dia_semana(c.dia)], c.dia.day(), mes_nome(c.dia.month())),
-                if c.dia == hoje { format!("hoje · semana {}", semana_iso(c.dia)) } else { format!("semana {}", semana_iso(c.dia)) },
+                if c.dia == hoje { format!("Hoje · semana {}", semana_iso(c.dia)) } else { format!("Semana {}", semana_iso(c.dia)) },
             ),
             Vista::Semana => {
                 let ini = inicio_semana(c.dia);
@@ -127,7 +122,7 @@ impl Gfx {
                 } else {
                     format!("{} de {} a {} de {}", ini.day(), mes_nome(ini.month()), fim.day(), mes_nome(fim.month()))
                 };
-                (t, format!("semana {}", semana_iso(c.dia)))
+                (t, format!("Semana {}", semana_iso(c.dia)))
             }
         };
         let lt = self.largura(&titulo, &ftit)?;
@@ -147,7 +142,7 @@ impl Gfx {
             x += cel;
         }
         x += 14.0 * s;
-        for (v, nome) in [(Vista::Dia, "dia"), (Vista::Semana, "semana")] {
+        for (v, nome) in [(Vista::Dia, "Dia"), (Vista::Semana, "Semana")] {
             let lw = self.largura(nome, &fb)? + 20.0 * s;
             let r = ret(x, 0.0, x + lw, topo);
             let sim = c.vista == v;
@@ -164,7 +159,7 @@ impl Gfx {
         if xd > x {
             let rf = ret(x, 0.0, xd - 12.0 * s, topo);
             if c.filtro.is_empty() {
-                self.texto("texto para filtrar", &f, rf, k(t.texto_escuro))?;
+                self.texto("Texto para filtrar", &f, rf, k(t.texto_escuro))?;
             } else {
                 self.texto(&c.filtro, &f, rf, k(t.amarelo))?;
             }
@@ -176,12 +171,12 @@ impl Gfx {
         let pe0 = h - borda - 28.0 * s;
         self.preencher(ret(0.0, pe0, w, pe0 + 1.0 * s), k(t.selecao))?;
         let dicas = [
-            ("←→", "dia ou semana anterior e seguinte"),
-            ("tab", "alternar dia e semana"),
-            ("home", "hoje"),
-            ("texto", "filtrar"),
-            ("clique direito", "copiar ou abrir com o Claude"),
-            ("esc", "fechar"),
+            ("←→", "Dia ou semana anterior e seguinte"),
+            ("Tab", "Alternar dia e semana"),
+            ("Home", "Hoje"),
+            ("Texto", "Filtrar"),
+            ("Clique direito", "Copiar ou abrir com o Claude"),
+            ("Esc", "Fechar"),
         ];
         let mut xp = 16.0 * s;
         for (tecla, o_que) in dicas {
@@ -193,7 +188,7 @@ impl Gfx {
             xp += lo + 20.0 * s;
         }
         if c.copiado.is_some_and(|t0| t0.elapsed().as_millis() < 1500) {
-            self.texto("copiado", &fr, ret(xp, pe0, w - 16.0 * s, h - borda), k(t.verde))?;
+            self.texto("Copiado", &fr, ret(xp, pe0, w - 16.0 * s, h - borda), k(t.verde))?;
         }
 
         // ---------- colunas ----------
@@ -241,7 +236,7 @@ impl Gfx {
             self.texto("Pendências", &fb, ret(xa, y, xb, y + 20.0 * s), k(t.texto_forte))?;
             // abas, da direita para a esquerda
             let mut xd = xb;
-            for (conc, nome, n) in [(true, "concluídas", hist.len()), (false, "em aberto", abertas)] {
+            for (conc, nome, n) in [(true, "Concluídas", hist.len()), (false, "Em aberto", abertas)] {
                 let rot_aba = format!("{nome} {n}");
                 let sim = c.aba_concluidas == conc;
                 let lw = self.largura(&rot_aba, &f)? + 12.0 * s;
@@ -270,7 +265,7 @@ impl Gfx {
                 let se = &d.sessoes[i];
                 self.glifo(G_ATENCAO, &fg, ret(xa - 4.0 * s, y, xa + 16.0 * s, y + linha), k(t.amarelo))?;
                 self.texto(&format!("Sessão em {} aguarda permissão", se.nome()), &f, ret(xa + 22.0 * s, y, xb - 60.0 * s, y + linha), k(t.texto_forte))?;
-                self.texto(&format!("desde {}", hm(se.desde)), &fr, ret(xa, y, xb, y + linha), k(t.amarelo))?;
+                self.texto(&format!("Desde {}", hm(se.desde)), &fr, ret(xa, y, xb, y + linha), k(t.amarelo))?;
                 let msg = if se.mensagem.is_empty() { se.pasta.clone() } else { se.mensagem.clone() };
                 self.texto(&format!("{}  {msg}", crate::central::G_CLAUDE), &f, ret(xa + 22.0 * s, y + linha, xb, y + 2.0 * linha), k(apagado))?;
                 alvos.push((ret(xa - 6.0 * s, y - 4.0 * s, xb + 6.0 * s, y + 2.0 * linha + 4.0 * s), AlvoCentral::Sessao(i)));
@@ -282,7 +277,7 @@ impl Gfx {
                 let ex = fo.executar.as_ref().map(|e| e.rotulo.clone()).unwrap_or_default();
                 self.glifo(fo.glifo, &fg, ret(xa - 4.0 * s, y, xa + 16.0 * s, y + linha), k(t.amarelo))?;
                 self.texto(&format!("Rotinas do {} sem execução hoje", rotulo_da_fonte(&fo.nome)), &f, ret(xa + 22.0 * s, y, xb - 60.0 * s, y + linha), k(t.texto_forte))?;
-                self.texto("hoje", &fr, ret(xa, y, xb, y + linha), k(t.amarelo))?;
+                self.texto("Hoje", &fr, ret(xa, y, xb, y + linha), k(t.amarelo))?;
                 self.texto(&fo.descricao, &f, ret(xa + 22.0 * s, y + linha, xb, y + 2.0 * linha), k(apagado))?;
                 let lw = self.largura(&ex, &f)? + 4.0 * s;
                 let r = ret(xa + 22.0 * s, y + 2.0 * linha + 2.0 * s, xa + 22.0 * s + lw, y + 3.0 * linha + 2.0 * s);
@@ -327,7 +322,7 @@ impl Gfx {
                     let m = y + linha / 2.0;
                     self.preencher(ret(rt.left, m, rt.left + lw, m + 1.0 * s), k(t.texto_escuro))?;
                 }
-                let origem = if p.origem.is_empty() { d.fontes[p.fonte].descricao.clone() } else { p.origem.clone() };
+                let origem = if p.origem.is_empty() { d.fontes[p.fonte].descricao.clone() } else { cap(&p.origem) };
                 self.texto(&format!("{}  {origem}", fonte_g(p.fonte)), &f, ret(xa + 22.0 * s, y + linha, xb, y + 2.0 * linha), k(apagado))?;
                 if executa {
                     let rot = p.executar.as_ref().map(|e| e.rotulo.clone()).unwrap_or_default();
@@ -366,7 +361,7 @@ impl Gfx {
                     self.texto(&dia, &fr, ret(xa, y, xb, y + linha), k(apagado))?;
                     let fi = d.fontes.iter().position(|f| f.nome == h.fonte);
                     let g = fi.map(|fi| d.fontes[fi].glifo).unwrap_or(crate::central::G_FONTE);
-                    self.texto(&format!("{g}  {}", h.origem), &f, ret(xa + 22.0 * s, y + linha, xb, y + 2.0 * linha), k(apagado))?;
+                    self.texto(&format!("{g}  {}", cap(&h.origem)), &f, ret(xa + 22.0 * s, y + linha, xb, y + 2.0 * linha), k(apagado))?;
                     alvos.push((ret(lin.left, lin.top, xa + 18.0 * s, lin.bottom), AlvoCentral::Reabrir(i)));
                     if tem_link {
                         alvos.push((lin, AlvoCentral::LinkConcluida(i)));
@@ -384,8 +379,8 @@ impl Gfx {
                 y += 6.0 * s;
                 self.preencher(ret(xa, y, xb, y + 1.0 * s), k(t.selecao))?;
                 y += 8.0 * s;
-                self.texto("prazos", &f, ret(xa, y, xb, y + linha), k(rotulo))?;
-                self.texto("próximos 60 dias", &fr, ret(xa, y, xb, y + linha), k(rotulo))?;
+                self.texto("Prazos", &f, ret(xa, y, xb, y + linha), k(rotulo))?;
+                self.texto("Próximos 60 dias", &fr, ret(xa, y, xb, y + linha), k(rotulo))?;
                 y += linha + 8.0 * s;
                 let mut lista: Vec<(NaiveDate, String, usize, AlvoCentral)> = d
                     .prazos
@@ -519,7 +514,7 @@ impl Gfx {
         if !rot.is_empty() && y + 3.0 * linha < limite {
             self.preencher(ret(xa, y, xb, y + 1.0 * s), k(t.selecao))?;
             y += 8.0 * s;
-            self.texto("rotinas", &f, ret(xa, y, xb, y + linha), k(rotulo))?;
+            self.texto("Rotinas", &f, ret(xa, y, xb, y + linha), k(rotulo))?;
             let falhas = rot.iter().filter(|&&i| d.rotinas[i].ultima.is_some_and(|(_, e)| e == Estado::Falha)).count();
             if falhas > 0 {
                 self.texto(&format!("{falhas} com falha"), &fr, ret(xa, y, xb, y + linha), k(t.vermelho))?;
@@ -539,7 +534,7 @@ impl Gfx {
                 }
                 if fq != grupo {
                     grupo = fq;
-                    self.texto(FREQUENCIAS[fq], &fb, ret(xa, y, xb, y + linha), k(apagado))?;
+                    self.texto(&cap(FREQUENCIAS[fq]), &fb, ret(xa, y, xb, y + linha), k(apagado))?;
                     y += titulo_grupo;
                 }
                 let est = ro.ultima.map(|(_, e)| e).unwrap_or(Estado::Agendada);
@@ -567,7 +562,7 @@ impl Gfx {
                 y += 2.0 * linha + 8.0 * s;
             }
             if resto > 0 {
-                self.texto(&format!("mais {resto}"), &f, ret(xa + 20.0 * s, y, xb, y + linha), k(apagado))?;
+                self.texto(&format!("Mais {resto}"), &f, ret(xa + 20.0 * s, y, xb, y + linha), k(apagado))?;
                 y += linha + 6.0 * s;
             }
         }
@@ -577,16 +572,16 @@ impl Gfx {
         if claude_visivel && !d.sessoes.is_empty() && y + 3.0 * linha < limite {
             self.preencher(ret(xa, y, xb, y + 1.0 * s), k(t.selecao))?;
             y += 8.0 * s;
-            self.texto("sessões do Claude", &f, ret(xa, y, xb, y + linha), k(rotulo))?;
+            self.texto("Sessões do Claude", &f, ret(xa, y, xb, y + linha), k(rotulo))?;
             y += linha + 6.0 * s;
             for (i, se) in d.sessoes.iter().enumerate() {
                 if y + linha > limite {
                     break;
                 }
                 let (g, tinta, estado) = match se.estado {
-                    EstadoSessao::Trabalhando => ("\u{f110}", t.amarelo, format!("em execução há {}", duracao((cena.agora - se.inicio).num_minutes().max(0)))),
-                    EstadoSessao::Permissao => (G_ATENCAO, t.amarelo, "aguarda permissão".to_string()),
-                    EstadoSessao::Concluida => ("\u{f00c}", t.verde, format!("concluída às {}", hm(se.desde))),
+                    EstadoSessao::Trabalhando => ("\u{f110}", t.amarelo, format!("Em execução há {}", duracao((cena.agora - se.inicio).num_minutes().max(0)))),
+                    EstadoSessao::Permissao => (G_ATENCAO, t.amarelo, "Aguarda permissão".to_string()),
+                    EstadoSessao::Concluida => ("\u{f00c}", t.verde, format!("Concluída às {}", hm(se.desde))),
                 };
                 self.glifo(g, &fg, ret(xa - 4.0 * s, y, xa + 14.0 * s, y + linha), k(tinta))?;
                 let le = self.largura(&estado, &f)? + 10.0 * s;
@@ -603,7 +598,7 @@ impl Gfx {
             y += 4.0 * s;
             self.preencher(ret(xa, y, xb, y + 1.0 * s), k(t.selecao))?;
             y += 8.0 * s;
-            self.texto("fontes", &f, ret(xa, y, xb, y + linha), k(rotulo))?;
+            self.texto("Fontes", &f, ret(xa, y, xb, y + linha), k(rotulo))?;
             y += linha + 6.0 * s;
             for (i, fo) in problemas {
                 if y + 3.0 * linha > limite {
@@ -692,13 +687,13 @@ impl Gfx {
             self.preencher(r, k(if sel { t.selecao } else { t.fundo_claro }))?;
             self.borda(r, k(if sel || hover(AlvoCentral::Evento(i)) { t.texto } else { t.mudo }), 1.0 * s)?;
             self.texto(&e.titulo, &fb, ret(r.left + 8.0 * s, r.top, r.right - 6.0 * s, r.bottom), k(t.texto_forte))?;
-            self.texto("dia inteiro", &f, ret(xa, r.top, lx0, r.bottom), k(t.texto_escuro))?;
+            self.texto("Dia inteiro", &f, ret(xa, r.top, lx0, r.bottom), k(t.texto_escuro))?;
             alvos.push((r, AlvoCentral::Evento(i)));
             y += 26.0 * s;
         }
 
-        self.texto("agenda", &f, ret(lx0 + 8.0 * s, y, meio, y + 18.0 * s), k(rotulo))?;
-        self.texto("rotinas", &f, ret(meio + 8.0 * s, y, xb, y + 18.0 * s), k(rotulo))?;
+        self.texto("Agenda", &f, ret(lx0 + 8.0 * s, y, meio, y + 18.0 * s), k(rotulo))?;
+        self.texto("Rotinas", &f, ret(meio + 8.0 * s, y, xb, y + 18.0 * s), k(rotulo))?;
         y += 22.0 * s;
 
         // detalhe
@@ -846,13 +841,13 @@ impl Gfx {
                 Sel::Evento(i) => {
                     let e = &d.eventos[i];
                     let fo = &d.fontes[e.fonte];
-                    let quando = if e.dia_inteiro { "dia inteiro".to_string() } else { format!("{}–{}", hm(e.inicio), hm(e.fim)) };
+                    let quando = if e.dia_inteiro { "Dia inteiro".to_string() } else { format!("{}–{}", hm(e.inicio), hm(e.fim)) };
                     let meta = if e.local.is_empty() { format!("{}  {}", fo.glifo, fo.descricao) } else { format!("{}  {} · {}", fo.glifo, fo.descricao, e.local) };
                     if !e.link.is_empty() {
-                        botoes.push((0, "abrir no Google Agenda".into()));
+                        botoes.push((0, "Abrir no Google Agenda".into()));
                     }
                     if !e.reuniao.is_empty() {
-                        botoes.push((1, "entrar na reunião".into()));
+                        botoes.push((1, "Entrar na reunião".into()));
                     }
                     (e.titulo.clone(), quando, apagado, meta, e.descricao.clone())
                 }
@@ -866,13 +861,13 @@ impl Gfx {
                     };
                     let meta = format!("{}  {} · {}{dur}", fo.glifo, fo.descricao, hm(e.inicio));
                     if !e.registro.is_empty() {
-                        botoes.push((0, "abrir registro".into()));
+                        botoes.push((0, "Abrir registro".into()));
                     }
                     if let Some(ex) = e.executar.as_ref().or(fo.executar.as_ref()) {
-                        let r = if e.executar.is_some() { ex.rotulo.clone() } else if e.estado == Estado::Agendada { "executar agora".into() } else { "executar novamente".into() };
+                        let r = if e.executar.is_some() { ex.rotulo.clone() } else if e.estado == Estado::Agendada { "Executar agora".into() } else { "Executar novamente".into() };
                         botoes.push((2, r));
                     }
-                    (e.titulo.clone(), format!("{}  {}", e.estado.glifo(), e.estado.rotulo()), tinta_estado(e.estado), meta, e.resumo.clone())
+                    (e.titulo.clone(), format!("{}  {}", e.estado.glifo(), cap(e.estado.rotulo())), tinta_estado(e.estado), meta, e.resumo.clone())
                 }
             };
             let ld = self.largura(&dir, &f)?;
@@ -922,7 +917,7 @@ impl Gfx {
         let (xa, xb) = (area.left + pad, area.right - pad);
         let mut y = area.top + 12.0 * s;
         self.texto("Semana", &fb, ret(xa, y, xb, y + 20.0 * s), k(t.texto_forte))?;
-        self.texto("selecione um dia para detalhar", &fr, ret(xa, y, xb, y + 20.0 * s), k(apagado))?;
+        self.texto("Selecione um dia para detalhar", &fr, ret(xa, y, xb, y + 20.0 * s), k(apagado))?;
         y += 28.0 * s;
         self.preencher(ret(xa, y, xb, y + 1.0 * s), k(t.selecao))?;
         let ini = inicio_semana(c.dia);
@@ -978,7 +973,7 @@ impl Gfx {
                 yy += alt + 4.0 * s;
             }
             if resto > 0 {
-                self.texto(&format!("mais {resto}"), &f, ret(ca, yy, cb, yy + 18.0 * s), k(apagado))?;
+                self.texto(&format!("Mais {resto}"), &f, ret(ca, yy, cb, yy + 18.0 * s), k(apagado))?;
                 yy += 22.0 * s;
             }
             if !exs.is_empty() {

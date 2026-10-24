@@ -82,11 +82,11 @@ impl Painel {
 
     fn linhas_volume(&self, audio: Option<&Audio>) -> Vec<LinhaPainel> {
         let (nivel, mudo) = audio.and_then(|a| a.nivel()).unwrap_or((0.0, true));
-        let num = if mudo { "mudo".to_string() } else { format!("{}%", (nivel * 100.0).round() as i32) };
+        let num = if mudo { "Mudo".to_string() } else { format!("{}%", (nivel * 100.0).round() as i32) };
         let mut v = vec![
             LinhaPainel::Titulo { texto: "Volume".into(), dir: num },
             LinhaPainel::Nivel { glifo: audio::glifo(nivel, mudo), mudo, nivel },
-            LinhaPainel::Rotulo { texto: "saída".into(), chave: None },
+            LinhaPainel::Rotulo { texto: "Saída".into(), chave: None },
         ];
         for (i, s) in self.saidas.iter().enumerate() {
             v.push(LinhaPainel::Item {
@@ -101,7 +101,7 @@ impl Painel {
             });
         }
         if !self.programas.is_empty() {
-            v.push(LinhaPainel::Rotulo { texto: "programas".into(), chave: None });
+            v.push(LinhaPainel::Rotulo { texto: "Programas".into(), chave: None });
             for (i, p) in self.programas.iter().enumerate() {
                 v.push(LinhaPainel::Programa {
                     icone: self.icones.get(i).copied().unwrap_or_default(),
@@ -133,9 +133,9 @@ impl Painel {
         }
         for p in &self.placas {
             let (dir, tom) = if !p.conectada {
-                ("desconectada".to_string(), Tom::Apagado)
+                ("Desconectada".to_string(), Tom::Apagado)
             } else if p.ip.is_empty() {
-                ("conectada".to_string(), Tom::Destaque)
+                ("Conectada".to_string(), Tom::Destaque)
             } else {
                 (p.ip.clone(), if p.internet { Tom::Destaque } else { Tom::Normal })
             };
@@ -154,11 +154,11 @@ impl Painel {
         };
         match &self.bt {
             None => {
-                v.push(LinhaPainel::Rotulo { texto: "bluetooth".into(), chave: None });
+                v.push(LinhaPainel::Rotulo { texto: "Bluetooth".into(), chave: None });
                 v.push(nada("Lendo os dispositivos…"));
             }
             Some(Situacao { radio: None, .. }) => {
-                v.push(LinhaPainel::Rotulo { texto: "bluetooth".into(), chave: None });
+                v.push(LinhaPainel::Rotulo { texto: "Bluetooth".into(), chave: None });
                 v.push(nada("Sem adaptador Bluetooth"));
             }
             Some(Situacao { radio: Some(ligado), dispositivos }) => {
@@ -175,9 +175,9 @@ impl Painel {
                 }
                 for (i, d) in dispositivos.iter().enumerate().filter(|_| *ligado) {
                     let (dir, tom) = match self.pedido {
-                        Some(Pedido::Conectar(e)) if e == d.endereco => ("conectando…".to_string(), Tom::Amarelo),
-                        Some(Pedido::Desconectar(e)) if e == d.endereco => ("desconectando…".to_string(), Tom::Amarelo),
-                        _ if d.conectado => ("conectado".to_string(), Tom::Destaque),
+                        Some(Pedido::Conectar(e)) if e == d.endereco => ("Conectando…".to_string(), Tom::Amarelo),
+                        Some(Pedido::Desconectar(e)) if e == d.endereco => ("Desconectando…".to_string(), Tom::Amarelo),
+                        _ if d.conectado => ("Conectado".to_string(), Tom::Destaque),
                         _ => (String::new(), Tom::Normal),
                     };
                     v.push(LinhaPainel::Item {

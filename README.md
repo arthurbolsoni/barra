@@ -30,7 +30,7 @@ Só as janelas do grupo ativo ficam na tela. As dos outros grupos ficam estacion
 Abrem embaixo do ícone, no tema da barra, sem tirar o foco da janela em uso. Fecham com clique fora, Esc ou outro clique no ícone.
 
 - Volume: nível geral (arrastar, clicar no trilho ou rodar; o glifo liga o mudo), saída de som (vira a padrão nos três papéis, pela `IPolicyConfig`) e volume de cada programa que está com som aberto.
-- Rede: as placas físicas, com o IP ou "desconectada", e as VPNs ligadas. Abaixo, o Bluetooth: interruptor do rádio e os dispositivos pareados (clássicos e BLE). Fone e caixa conectam e desconectam ali (pedido ao filtro de áudio Bluetooth, como o ToothTray); os outros abrem as Configurações de Bluetooth.
+- Rede: as placas físicas, com o IP ou "Desconectada", e as VPNs ligadas. Abaixo, o Bluetooth: interruptor do rádio e os dispositivos pareados (clássicos e BLE). Fone e caixa conectam e desconectam ali (pedido ao filtro de áudio Bluetooth, como o ToothTray); os outros abrem as Configurações de Bluetooth.
 - O Bluetooth é lido numa thread à parte e relido a cada 3 s com o painel aberto.
 
 ## Visão geral
@@ -76,7 +76,7 @@ Formato de `<fonte>.json`:
   "descricao": "soul · D:\Desktop\soul",
   "atualizado": "2026-10-23T10:30:00-03:00",
   "erro": "texto, quando a última leitura falhou (opcional)",
-  "executar": { "rotulo": "executar as rotinas", "pasta": "D:\Desktop\soul", "comando": "claude \"/rotinas\"" },
+  "executar": { "rotulo": "Executar as rotinas", "pasta": "D:\Desktop\soul", "comando": "claude \"/rotinas\"" },
   "itens": [
     { "tipo": "evento", "id": "…", "titulo": "…", "inicio": "2026-10-23T09:00", "fim": "2026-10-23T09:15", "local": "…", "descricao": "…", "link": "…", "reuniao": "…" },
     { "tipo": "execucao", "id": "…", "titulo": "…", "inicio": "2026-10-23T07:30", "fim": "…", "estado": "ok | falha | executando | agendada", "resumo": "…", "registro": "caminho ou endereço", "executar": { "…": "…" } },
@@ -95,7 +95,7 @@ Formato de `<fonte>.json`:
 
 A barra copia `barra-central.exe` para `%LOCALAPPDATA%\barra\bin` e abre o serviço ao iniciar (sem janela, uma instância só). Quando o executável compilado muda, a barra encerra o serviço, troca a cópia e abre de novo.
 
-- Agenda: lida pelo endereço iCal de cada agenda (o "endereço secreto no formato iCal" do Google Agenda, o calendário publicado do Outlook.com), só leitura. Expande eventos recorrentes (`RRULE`, `EXDATE`, exceções por `RECURRENCE-ID`) e converte o fuso do `VTIMEZONE` para a hora local. Sincroniza a cada 5 minutos, de 14 dias atrás a 60 dias à frente, e também quando a central abre e a última sincronização tem mais de um minuto. Configuração em `%LOCALAPPDATA%\barra\agenda-config.json`: `{ "agendas": [{ "nome": "Google", "ical": "https://…" }], "intervalo_min": 5 }`; os endereços não vão para o log nem para as mensagens de erro. Agenda com erro fica com os eventos da última leitura e o erro aparece em "fontes".
+- Agenda: lida pelo endereço iCal de cada agenda (o "endereço secreto no formato iCal" do Google Agenda, o calendário publicado do Outlook.com), só leitura. Expande eventos recorrentes (`RRULE`, `EXDATE`, exceções por `RECURRENCE-ID`) e converte o fuso do `VTIMEZONE` para a hora local. Sincroniza a cada 5 minutos, de 14 dias atrás a 60 dias à frente, e também quando a central abre e a última sincronização tem mais de um minuto. Configuração em `%LOCALAPPDATA%\barra\agenda-config.json`: `{ "agendas": [{ "nome": "Google", "ical": "https://…" }], "intervalo_min": 5 }`; os endereços não vão para o log nem para as mensagens de erro. Agenda com erro fica com os eventos da última leitura e o erro aparece em "Fontes".
 - `barra-central agenda [de] [ate]` lê as agendas na hora e imprime um evento JSON por linha (padrão: de hoje a 7 dias); a skill `agenda` do Claude Code usa esse comando.
 - Agentes: relê o claude-hooks a cada 30 segundos. Tarefa vira rotina (com `claude-hooks run <tarefa>`), execução dos últimos 14 dias vira execução, e a execução mais recente de cada tarefa que terminou com `acao_necessaria` vira pendência. Sem `~/.claude-hooks`, a fonte não aparece.
 - `barra-central hook`: chamado pelos hooks do Claude Code (`SessionStart`, `UserPromptSubmit`, `Notification`, `PostToolUse`, `Stop`, `SessionEnd` em `~/.claude/settings.json`) com o evento no stdin. Estados: `trabalhando`, `permissao`, `concluida`; `SessionEnd` apaga o arquivo da sessão.

@@ -96,7 +96,7 @@ pub fn sincronizar() {
     for t in ler_tarefas(&home) {
         let runs = ler_execucoes(&home, &t.nome);
         let comando = format!("claude-hooks run {}", t.nome);
-        let mut rotina = json!({ "tipo": "rotina", "id": t.nome, "titulo": t.titulo, "quando": t.quando, "executar": { "rotulo": "executar agora", "comando": comando } });
+        let mut rotina = json!({ "tipo": "rotina", "id": t.nome, "titulo": t.titulo, "quando": t.quando, "executar": { "rotulo": "Executar agora", "comando": comando } });
         if let Some((m, _)) = runs.first() {
             if let Some(data) = local(m["started_at"].as_str()) {
                 rotina["ultima"] = json!({ "data": &data[..10], "estado": estado(m["status"].as_str().unwrap_or("")) });
@@ -124,7 +124,7 @@ pub fn sincronizar() {
                 "inicio": inicio,
                 "estado": estado(m["status"].as_str().unwrap_or("")),
                 "resumo": resumo.join("\n"),
-                "executar": { "rotulo": "executar novamente", "comando": comando },
+                "executar": { "rotulo": "Executar novamente", "comando": comando },
             });
             if let Some(fim) = local(m["finished_at"].as_str()) {
                 ex["fim"] = Value::String(fim);

@@ -637,7 +637,7 @@ impl Gfx {
                     let cheio = if *mudo { t.texto_escuro } else if hover(AlvoPainel::Nivel) { t.texto_forte } else { t.destaque };
                     self.preencher(ret(l0, meio - e, l0 + (l1 - l0) * nivel.clamp(0.0, 1.0), meio + e), cor(cheio, 1.0))?;
                     alvos.push((ret(l0, topo, l1, base), AlvoPainel::Nivel));
-                    let num = if *mudo { "mudo".to_string() } else { format!("{}%", (nivel * 100.0).round() as i32) };
+                    let num = if *mudo { "Mudo".to_string() } else { format!("{}%", (nivel * 100.0).round() as i32) };
                     self.texto(&num, &f_dir, ret(l1, topo, w - pad, base), cor(t.texto_forte, 1.0))?;
                 }
                 LinhaPainel::Rotulo { texto, chave } => {

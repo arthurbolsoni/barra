@@ -63,6 +63,12 @@ impl Estado {
 }
 
 /// Comando que a fonte oferece (executar as rotinas, executar uma tarefa).
+/// Texto com a primeira letra maiúscula.
+pub fn cap(s: &str) -> String {
+    let mut c = s.chars();
+    c.next().map(|p| p.to_uppercase().chain(c).collect()).unwrap_or_default()
+}
+
 #[derive(Clone, Debug)]
 pub struct Executar {
     pub rotulo: String,
@@ -77,7 +83,7 @@ impl Executar {
             return None;
         }
         Some(Executar {
-            rotulo: v["rotulo"].as_str().unwrap_or(rotulo_padrao).to_string(),
+            rotulo: cap(v["rotulo"].as_str().unwrap_or(rotulo_padrao)),
             pasta: v["pasta"].as_str().unwrap_or("").to_string(),
             comando,
         })
@@ -360,7 +366,7 @@ impl Dados {
                 glifo: glifo_da_fonte(nome),
                 atualizado: v["atualizado"].as_str().and_then(data_hora).map(|(d, _)| d),
                 erro: v["erro"].as_str().map(String::from).filter(|e| !e.is_empty()),
-                executar: Executar::de(&v["executar"], "executar"),
+                executar: Executar::de(&v["executar"], "Executar"),
             });
             for it in v["itens"].as_array().into_iter().flatten() {
                 d.item(i, it);
@@ -399,7 +405,7 @@ impl Dados {
         if titulo.is_empty() {
             return;
         }
-        let executar = Executar::de(&it["executar"], "executar agora");
+        let executar = Executar::de(&it["executar"], "Executar agora");
         match it["tipo"].as_str().unwrap_or("") {
             "evento" => {
                 let Some((inicio, dia_inteiro)) = it["inicio"].as_str().and_then(data_hora) else { return };
@@ -747,7 +753,7 @@ impl Central {
             }
             AlvoCentral::Pendencia(i) | AlvoCentral::LinkPendencia(i) | AlvoCentral::ExecutarPendencia(i) => {
                 let p = d.pendencias.get(i)?;
-                let prazo = p.prazo.map(|z| format!("prazo {}", z.format("%d/%m/%Y"))).unwrap_or_default();
+                let prazo = p.prazo.map(|z| format!("Prazo {}", z.format("%d/%m/%Y"))).unwrap_or_default();
                 juntar(vec![p.titulo.clone(), p.origem.clone(), prazo, p.link.clone()])
             }
             AlvoCentral::Prazo(i) => {
@@ -756,12 +762,12 @@ impl Central {
             }
             AlvoCentral::Rotina(i) | AlvoCentral::RotinaLinha(i) => {
                 let r = d.rotinas.get(i)?;
-                let prox = r.proxima.map(|z| format!("próxima {}", z.format("%d/%m/%Y"))).unwrap_or_default();
+                let prox = r.proxima.map(|z| format!("Próxima {}", z.format("%d/%m/%Y"))).unwrap_or_default();
                 juntar(vec![r.titulo.clone(), r.quando.clone(), prox, r.executar.as_ref().map(|e| e.comando.clone()).unwrap_or_default()])
             }
             AlvoCentral::Reabrir(i) | AlvoCentral::LinkConcluida(i) => {
                 let h = d.historico.get(i)?;
-                juntar(vec![h.titulo.clone(), h.origem.clone(), format!("concluída em {}", hm(h.quando)), h.link.clone()])
+                juntar(vec![h.titulo.clone(), h.origem.clone(), format!("Concluída em {}", hm(h.quando)), h.link.clone()])
             }
             AlvoCentral::ExecutarFonte(i) => d.fontes.get(i)?.executar.as_ref().map(|e| e.comando.clone()),
             AlvoCentral::Fonte(i) => {
@@ -771,23 +777,23 @@ impl Central {
             AlvoCentral::Sessao(i) => {
                 let se = d.sessoes.get(i)?;
                 let estado = match se.estado {
-                    EstadoSessao::Trabalhando => format!("em execução desde {}", se.inicio.format("%H:%M")),
-                    EstadoSessao::Permissao => format!("aguarda permissão desde {}", se.desde.format("%H:%M")),
-                    EstadoSessao::Concluida => format!("concluída às {}", se.desde.format("%H:%M")),
+                    EstadoSessao::Trabalhando => format!("Em execução desde {}", se.inicio.format("%H:%M")),
+                    EstadoSessao::Permissao => format!("Aguarda permissão desde {}", se.desde.format("%H:%M")),
+                    EstadoSessao::Concluida => format!("Concluída às {}", se.desde.format("%H:%M")),
                 };
                 juntar(vec![format!("Sessão do Claude Code em {}", se.nome()), se.pasta.clone(), estado, se.mensagem.clone()])
             }
             AlvoCentral::Dia(dia) => {
                 let mut v = vec![dia.format("%d/%m/%Y").to_string()];
                 for e in d.eventos.iter().filter(|e| e.inicio.date() <= dia && e.fim.date() >= dia && (e.fim.date() > dia || e.fim > e.inicio || e.inicio.date() == dia)) {
-                    let h = if e.dia_inteiro { "dia inteiro".to_string() } else { format!("{}–{}", e.inicio.format("%H:%M"), e.fim.format("%H:%M")) };
+                    let h = if e.dia_inteiro { "Dia inteiro".to_string() } else { format!("{}–{}", e.inicio.format("%H:%M"), e.fim.format("%H:%M")) };
                     v.push(format!("{h}  {}", e.titulo));
                 }
                 for e in d.execucoes.iter().filter(|e| e.inicio.date() == dia) {
                     v.push(format!("{}  {} ({})", e.inicio.format("%H:%M"), e.titulo, e.estado.rotulo()));
                 }
                 for p in d.prazos.iter().filter(|p| p.data == dia) {
-                    v.push(format!("prazo: {}", p.titulo));
+                    v.push(format!("Prazo: {}", p.titulo));
                 }
                 juntar(v)
             }
