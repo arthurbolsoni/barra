@@ -190,6 +190,12 @@ pub fn ligar(barra: HWND) {
         let taskband = CreateWindowExW(WINDOW_EX_STYLE(0), CLASSE_TASKBAND, PCWSTR::null(), WS_POPUP, 0, 0, 0, 0, None, None, Some(inst.into()), None)
             .unwrap_or_default();
         _ = SetPropW(janela, w!("TaskbandHWND"), Some(HANDLE(taskband.0)));
+        // a barra roda elevada: sem isso o UIPI barra o que vem de programas sem elevação
+        // (Steam, Discord...) e o ícone deles não chega nem aqui nem no Explorer
+        _ = ChangeWindowMessageFilterEx(janela, WM_COPYDATA, MSGFLT_ALLOW, None);
+        for m in [TB_PROGRESSO, TB_ESTADO, TB_SELO] {
+            _ = ChangeWindowMessageFilterEx(taskband, m, MSGFLT_ALLOW, None);
+        }
         BANDEJA.with_borrow_mut(|b| {
             b.janela = janela;
             b.notify = notify;
