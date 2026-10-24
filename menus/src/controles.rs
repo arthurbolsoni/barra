@@ -842,10 +842,59 @@ pub fn criada_com_pai(h: HWND) {
         if classe_da_janela(h, "ToolbarWindow32") && GetParent(h).is_ok_and(|p| classe_da_janela(p, "Breadcrumb Parent")) {
             _ = SetWindowSubclass(h, Some(proc_caminho), ID_CAMINHO, 0);
         }
+        if classe_da_janela(h, "NetUIHWND") && classe_da_janela(GetAncestor(h, GA_ROOT), "CabinetWClass") {
+            _ = SetWindowSubclass(h, Some(proc_faixa), ID_FAIXA, 0);
+        }
     }
 }
 
 const ID_CAMINHO: usize = 0x6261_7263; // "barc"
+const ID_FAIXA: usize = 0x6261_7266; // "barf"
+
+/// Botão de ajuda (?) da faixa de opções do Explorador, no canto direito da fileira das abas:
+/// a faixa não tem como escondê-lo. Coordenadas da janela da faixa; None: ela não tem a fileira.
+unsafe fn ajuda_da_faixa(h: HWND) -> Option<RECT> {
+    let mut c = RECT::default();
+    GetClientRect(h, &mut c).ok()?;
+    let dpi = windows::Win32::UI::HiDpi::GetDpiForWindow(h).max(96) as i32;
+    let px = |v: i32| v * dpi / 96;
+    (c.bottom >= px(55) && c.right > px(200)).then(|| RECT { left: c.right - px(26), top: px(31), right: c.right, bottom: px(54) })
+}
+
+/// Janela da faixa de opções do Explorador: o botão de ajuda some (pintado com o fundo do tema
+/// depois de cada pintura) e o mouse naquele canto não chega à faixa (sem clique, sem dica).
+unsafe extern "system" fn proc_faixa(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM, _: usize, _: usize) -> LRESULT {
+    if !ligado() {
+        return DefSubclassProc(h, msg, wp, lp);
+    }
+    match msg {
+        WM_PAINT | WM_PRINTCLIENT => {
+            let r = DefSubclassProc(h, msg, wp, lp);
+            seguro((), || {
+                if let Some(a) = ajuda_da_faixa(h) {
+                    let dc = if msg == WM_PRINTCLIENT { HDC(wp.0 as *mut _) } else { GetDC(Some(h)) };
+                    preencher_direto(dc, &a, pincel(FUNDO));
+                    if msg != WM_PRINTCLIENT {
+                        ReleaseDC(Some(h), dc);
+                    }
+                }
+            });
+            r
+        }
+        WM_MOUSEMOVE | WM_LBUTTONDOWN | WM_LBUTTONUP | WM_LBUTTONDBLCLK | WM_RBUTTONDOWN | WM_RBUTTONUP | WM_MBUTTONDOWN | WM_MBUTTONUP => {
+            let p = POINT { x: (lp.0 & 0xFFFF) as i16 as i32, y: ((lp.0 >> 16) & 0xFFFF) as i16 as i32 };
+            if seguro(None, || ajuda_da_faixa(h)).is_some_and(|a| PtInRect(&a, p).as_bool()) {
+                return LRESULT(0);
+            }
+            DefSubclassProc(h, msg, wp, lp)
+        }
+        WM_NCDESTROY => {
+            _ = RemoveWindowSubclass(h, Some(proc_faixa), ID_FAIXA);
+            DefSubclassProc(h, msg, wp, lp)
+        }
+        _ => DefSubclassProc(h, msg, wp, lp),
+    }
+}
 
 thread_local! {
     /// Uma barra de ferramentas do caminho (barra de endereço do Explorador) está pintando.
@@ -920,6 +969,7 @@ unsafe fn refazer(h: HWND) {
     for j in std::iter::once(h).chain(filhas) {
         if ligado() {
             vestir_dialogo(j);
+            criada_com_pai(j);
         }
         // janela filha de outra linha de execução recebe pela fila, sem esperar
         if GetWindowThreadProcessId(j, None) == eu {
