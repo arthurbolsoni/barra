@@ -54,6 +54,8 @@ static SET_DC_BRUSH_COLOR: Original = AtomicUsize::new(0);
 static SET_DC_PEN_COLOR: Original = AtomicUsize::new(0);
 static PAT_BLT: Original = AtomicUsize::new(0);
 static CREATE_PEN: Original = AtomicUsize::new(0);
+static BIT_BLT: Original = AtomicUsize::new(0);
+static ALPHA_BLEND: Original = AtomicUsize::new(0);
 static FAIXA_COMPOSICAO: Original = AtomicUsize::new(0);
 static DUI_COR: Original = AtomicUsize::new(0);
 static DUI_FUNDO: Original = AtomicUsize::new(0);
@@ -140,6 +142,8 @@ fn instalar() {
         desviar(gdi32, PCSTR(c"SetDCPenColor".as_ptr() as _), set_dc_pen_color as *const (), &SET_DC_PEN_COLOR);
         desviar(gdi32, PCSTR(c"PatBlt".as_ptr() as _), pat_blt as *const (), &PAT_BLT);
         desviar(gdi32, PCSTR(c"CreatePen".as_ptr() as _), create_pen as *const (), &CREATE_PEN);
+        desviar(gdi32, PCSTR(c"BitBlt".as_ptr() as _), bit_blt as *const (), &BIT_BLT);
+        desviar(gdi32, PCSTR(c"GdiAlphaBlend".as_ptr() as _), alpha_blend as *const (), &ALPHA_BLEND);
         // antes de qualquer faixa de opções nascer: ela pergunta pela composição ao montar
         if let Ok(dwm) = LoadLibraryExW(w!("dwmapi.dll"), None, LOAD_LIBRARY_SEARCH_SYSTEM32) {
             desviar(dwm, PCSTR(c"DwmIsCompositionEnabled".as_ptr() as _), faixa_composicao as *const (), &FAIXA_COMPOSICAO);
@@ -859,6 +863,34 @@ unsafe fn ajuda_da_faixa(h: HWND) -> Option<RECT> {
     let dpi = windows::Win32::UI::HiDpi::GetDpiForWindow(h).max(96) as i32;
     let px = |v: i32| v * dpi / 96;
     (c.bottom >= px(55) && c.right > px(200)).then(|| RECT { left: c.right - px(26), top: px(31), right: c.right, bottom: px(54) })
+}
+
+/// A faixa desenhou direto na janela dela (fora do WM_PAINT, a fileira inteira das abas quando
+/// o mouse passa, ou o ícone): cobre o botão de ajuda de novo.
+unsafe fn cobrir_ajuda(dc: HDC) {
+    let h = WindowFromDC(dc);
+    if h.is_invalid() || !classe_da_janela(h, "NetUIHWND") || !classe_da_janela(GetAncestor(h, GA_ROOT), "CabinetWClass") {
+        return;
+    }
+    if let Some(a) = ajuda_da_faixa(h) {
+        preencher_direto(dc, &a, pincel(FUNDO));
+    }
+}
+
+unsafe extern "system" fn bit_blt(d: HDC, x: i32, y: i32, w: i32, h: i32, o: HDC, x1: i32, y1: i32, rop: ROP_CODE) -> BOOL {
+    let r = original::<unsafe extern "system" fn(HDC, i32, i32, i32, i32, HDC, i32, i32, ROP_CODE) -> BOOL>(&BIT_BLT)(d, x, y, w, h, o, x1, y1, rop);
+    if ligado() && seguro(false, chamado_pela_faixa) {
+        seguro((), || cobrir_ajuda(d));
+    }
+    r
+}
+
+unsafe extern "system" fn alpha_blend(d: HDC, x: i32, y: i32, w: i32, h: i32, o: HDC, x1: i32, y1: i32, w1: i32, h1: i32, f: BLENDFUNCTION) -> BOOL {
+    let r = original::<unsafe extern "system" fn(HDC, i32, i32, i32, i32, HDC, i32, i32, i32, i32, BLENDFUNCTION) -> BOOL>(&ALPHA_BLEND)(d, x, y, w, h, o, x1, y1, w1, h1, f);
+    if ligado() && seguro(false, chamado_pela_faixa) {
+        seguro((), || cobrir_ajuda(d));
+    }
+    r
 }
 
 /// Janela da faixa de opções do Explorador: o botão de ajuda some (pintado com o fundo do tema
