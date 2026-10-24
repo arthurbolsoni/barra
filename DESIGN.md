@@ -207,7 +207,7 @@ DirectWrite com localidade `pt-br`, sem quebra de linha, corte por caractere com
 
 Todas as medidas são em px a 96 dpi, multiplicadas pela escala do monitor.
 
-**Barra.** Faixa de 26 px no topo, registrada como AppBar. Esquerda, a partir de 6 px da borda: grupos lado a lado, cada um com a largura do nome (mínimo 7 px) mais 14 px; o "+" numa célula de 24 px; 14 px de separação; as janelas do grupo ativo em células de 28 px com ícone de 16 px centralizado. Direita, a 6 px da borda: volume, rede e o botão do navegador (glifo `f059f`, abre uma janela nova do navegador padrão) em células de 28 px; 6 px antes delas, os ícones da bandeja em células de 24 px, da direita para a esquerda. Centro: dia e hora, com 8 px de folga em cada lado; o relógio some quando as janelas ou a bandeja chegariam até ele.
+**Barra.** Faixa de 26 px no topo, registrada como AppBar. Esquerda, a partir de 6 px da borda: grupos lado a lado, cada um com a largura do nome (mínimo 7 px) mais 14 px; o "+" numa célula de 24 px; 14 px de separação; as janelas do grupo ativo em células de 28 px com ícone de 16 px centralizado. Direita, a 6 px da borda: volume e rede em células de 28 px; 6 px antes delas, os ícones da bandeja em células de 24 px, da direita para a esquerda. Centro: dia e hora, com 8 px de folga em cada lado; o relógio some quando as janelas ou a bandeja chegariam até ele.
 
 **Dica.** Abaixo da barra, 6 px de distância, centralizada no alvo e presa a 4 px das bordas do monitor. Altura 26 px, largura do texto mais 22 px, limite de 640 px de texto.
 

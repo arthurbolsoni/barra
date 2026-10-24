@@ -24,8 +24,6 @@ const FONTE: PCWSTR = w!("CaskaydiaMono Nerd Font");
 
 // glifos da Nerd Font
 const G_MAIS: &str = "\u{f067}";
-/// 󰖟 (md-web): botão do navegador.
-const G_NAVEGADOR: &str = "\u{f059f}";
 /// Programa sem ícone no painel de volume.
 const G_PROGRAMA: &str = "\u{f08c6}";
 pub const G_TERMINAL: &str = "\u{f120}";
@@ -54,7 +52,6 @@ pub enum Alvo {
     Grupo(usize),
     NovoGrupo,
     Janela(isize),
-    Navegador,
     Rede,
     Volume,
     Relogio,
@@ -524,18 +521,16 @@ impl Gfx {
         }
         let fim_esquerda = x;
 
-        // direita: navegador, rede e volume, e antes deles a bandeja dos outros programas
+        // direita: rede e volume, e antes deles a bandeja dos outros programas
         let celula_sis = 28.0 * s;
         let rv = ret(w - 6.0 * s - celula_sis, 0.0, w - 6.0 * s, h);
         let rs = ret(rv.left - celula_sis, 0.0, rv.left, h);
-        let rn = ret(rs.left - celula_sis, 0.0, rs.left, h);
         let (g_vol, vol_mudo) = match c.volume {
             Some((n, m)) => (crate::audio::glifo(n, m), m),
             None => (crate::audio::G_VOLUME_MUDO, true),
         };
         let sem_rede = mistura(t.texto, t.fundo, 0.3);
         for (r, alvo, g, tinta) in [
-            (rn, Alvo::Navegador, G_NAVEGADOR, t.texto),
             (rs, Alvo::Rede, c.rede.0, if c.rede.1 { t.texto } else { sem_rede }),
             (rv, Alvo::Volume, g_vol, if vol_mudo { t.vermelho } else { t.texto }),
         ] {
@@ -547,7 +542,7 @@ impl Gfx {
             self.glifo(g, &f_glifo, r, cor(tinta, 1.0))?;
             alvos.push((r, alvo));
         }
-        let mut xb = rn.left - 6.0 * s;
+        let mut xb = rs.left - 6.0 * s;
         for ic in c.bandeja.iter().rev() {
             let r = ret(xb - 24.0 * s, 0.0, xb, h);
             if hover(Alvo::Bandeja(ic.indice)) {

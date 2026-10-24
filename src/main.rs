@@ -310,7 +310,6 @@ fn clicar(alvo: Alvo) {
         }
         Alvo::Janela(h) => clicar_janela(h),
         Alvo::Bandeja(i) => bandeja::clicar(i, bandeja::Botao::Esquerdo, cursor()),
-        Alvo::Navegador => sistema::abrir_navegador(),
         Alvo::Rede => abrir_painel(painel::Tipo::Rede),
         Alvo::Volume => abrir_painel(painel::Tipo::Volume),
         Alvo::Relogio => alternar_central(),
@@ -330,7 +329,6 @@ fn mostrar_dica(st: &mut Estado) {
             let semana = central::semana_iso(chrono::Local::now().date_naive());
             format!("{}, {} de {} de {} · semana {semana}", DIAS[t.wDayOfWeek as usize % 7], t.wDay, MESES[(t.wMonth as usize + 11) % 12], t.wYear)
         }
-        Some(Alvo::Navegador) => format!("Abrir o {}", sistema::navegador_padrao().map(|(_, n)| n).unwrap_or_else(|| "navegador".into())),
         Some(Alvo::Rede) => st.rede.2.clone(),
         Some(Alvo::Volume) => match st.audio.as_ref().and_then(|a| a.nivel()) {
             Some((_, true)) => "Volume: mudo".into(),
