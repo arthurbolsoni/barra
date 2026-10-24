@@ -2087,6 +2087,11 @@ teclado::WM_GRUPO_VIZINHO => {            teclado::mascarar();            let de
             alternar_central();
             LRESULT(0)
         }
+        teclado::WM_NAVEGADOR => {
+            teclado::mascarar();
+            sistema::abrir_navegador(wp.0 == 1);
+            LRESULT(0)
+        }
         WM_APPBAR => {
             match wp.0 {
                 ABN_POSICAO | ABN_ESTADO => _ = com(posicionar),
