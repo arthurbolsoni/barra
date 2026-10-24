@@ -566,6 +566,11 @@ unsafe fn papel_do_pincel_cinza(b: HBRUSH) -> Option<usize> {
     papel_do_cinza(lb.lbColor.0)
 }
 
+/// Soma dos canais de um COLORREF.
+fn luz(c: u32) -> u32 {
+    (c & 0xFF) + ((c >> 8) & 0xFF) + ((c >> 16) & 0xFF)
+}
+
 type FSetBkColor = unsafe extern "system" fn(HDC, COLORREF) -> COLORREF;
 
 /// Fundo de texto opaco (árvore, listas) num desses cinzas: a cor do tema.
@@ -576,12 +581,13 @@ unsafe extern "system" fn set_bk_color(dc: HDC, c: COLORREF) -> COLORREF {
 
 /// Pincel e caneta do DC (DC_BRUSH, DC_PEN) num desses cinzas: o separador do painel da
 /// esquerda do Explorador é pintado assim. A faixa de opções pinta a fileira das abas com o
-/// pincel do DC em preto, fixo no modo escuro, fora das cores globais: o preto pedido pelo
-/// uiribbon.dll vira o fundo do tema (preto é preto no resto).
+/// pincel do DC em preto, fixo no modo escuro, e a divisória embaixo dela num tom mais escuro
+/// que o fundo: o que o uiribbon.dll pede mais escuro que o fundo do tema vira o fundo (preto
+/// é preto no resto).
 unsafe extern "system" fn set_dc_brush_color(dc: HDC, c: COLORREF) -> COLORREF {
     let c = if ligado() {
         papel_do_cinza(c.0)
-            .or_else(|| (c.0 & 0x00FF_FFFF == 0 && crate::MODO.load(Ordering::Relaxed) == crate::ESCURO && seguro(false, chamado_pela_faixa)).then_some(FUNDO))
+            .or_else(|| (crate::MODO.load(Ordering::Relaxed) == crate::ESCURO && luz(c.0) < luz(cor(FUNDO).0) && seguro(false, chamado_pela_faixa)).then_some(FUNDO))
             .map_or(c, cor)
     } else {
         c
