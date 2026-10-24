@@ -2089,7 +2089,7 @@ teclado::WM_GRUPO_VIZINHO => {            teclado::mascarar();            let de
         }
         teclado::WM_NAVEGADOR => {
             teclado::mascarar();
-            sistema::abrir_navegador(wp.0 == 1);
+            sistema::abrir_navegador();
             LRESULT(0)
         }
         WM_APPBAR => {

@@ -18,7 +18,7 @@ pub const WM_ESC_ALT: u32 = WM_APP + 23;
 pub const WM_GRUPO_VIZINHO: u32 = WM_APP + 24;
 /// Win+C: abre ou fecha a central.
 pub const WM_CENTRAL: u32 = WM_APP + 25;
-/// Win+Shift+B: navegador, como o Super+Shift+B do Omarchy (wparam 1 = janela privada, com Alt).
+/// Win+B: navegador.
 pub const WM_NAVEGADOR: u32 = WM_APP + 26;
 
 /// Para onde postar.
@@ -88,9 +88,9 @@ unsafe extern "system" fn gancho(code: i32, wp: WPARAM, lp: LPARAM) -> LRESULT {
                 postar(WM_CENTRAL, 0);
                 return LRESULT(1);
             }
-            // Win+Shift+B: navegador; com Alt, janela privada
-            if vk == VIRTUAL_KEY(0x42) && desce && (apertada(VK_LWIN) || apertada(VK_RWIN)) && apertada(VK_SHIFT) && !apertada(VK_CONTROL) {
-                postar(WM_NAVEGADOR, (k.flags.0 & LLKHF_ALTDOWN.0 != 0) as usize);
+            // Win+B: navegador (no lugar do foco na área de notificação do Windows)
+            if vk == VIRTUAL_KEY(0x42) && desce && (apertada(VK_LWIN) || apertada(VK_RWIN)) && !apertada(VK_SHIFT) && !apertada(VK_CONTROL) && k.flags.0 & LLKHF_ALTDOWN.0 == 0 {
+                postar(WM_NAVEGADOR, 0);
                 return LRESULT(1);
             }
             if vk == VK_TAB && desce && !apertada(VK_CONTROL) {

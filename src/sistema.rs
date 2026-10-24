@@ -294,42 +294,13 @@ fn navegador_padrao() -> Option<String> {
     }
 }
 
-/// Abre uma janela nova do navegador padrão (privada com `privada`). Quem abre é o Explorer da
-/// área de trabalho: a barra roda como administrador, e o navegador aberto por ela também rodaria.
-pub fn abrir_navegador(privada: bool) {
-    let Some(exe) = navegador_padrao() else {
-        abrir_uri(w!("https:"));
-        return;
-    };
-    let nome = std::path::Path::new(&exe).file_stem().map(|n| n.to_string_lossy().to_lowercase()).unwrap_or_default();
-    let args = match (privada, nome.as_str()) {
-        (false, _) => "",
-        (true, "firefox" | "librewolf" | "waterfox" | "zen") => "--private-window",
-        (true, "msedge") => "--inprivate",
-        (true, _) => "--incognito",
-    };
-    if unsafe { executar_sem_elevacao(&exe, args) }.is_err() {
-        _ = std::process::Command::new("explorer.exe").arg(&exe).spawn();
+/// Abre uma janela nova do navegador padrão. Quem abre é o Explorer: a barra roda como
+/// administrador, e o navegador aberto por ela também rodaria.
+pub fn abrir_navegador() {
+    match navegador_padrao() {
+        Some(exe) => _ = std::process::Command::new("explorer.exe").arg(exe).spawn(),
+        None => abrir_uri(w!("https:")),
     }
-}
-
-/// ShellExecute feito pelo Explorer da área de trabalho, que roda sem elevação.
-unsafe fn executar_sem_elevacao(exe: &str, args: &str) -> windows::core::Result<()> {
-    use windows::core::{Interface, BSTR};
-    use windows::Win32::System::Variant::VARIANT;
-    use windows::Win32::System::Com::*;
-    _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
-    let janelas: IShellWindows = CoCreateInstance(&ShellWindows, None, CLSCTX_LOCAL_SERVER)?;
-    let mut h = 0i32;
-    let vazio = VARIANT::default();
-    let disp = janelas.FindWindowSW(&VARIANT::from(CSIDL_DESKTOP as i32), &vazio, SWC_DESKTOP, &mut h, SWFO_NEEDDISPATCH)?;
-    let servico: IServiceProvider = disp.cast()?;
-    let navegador: IShellBrowser = servico.QueryService(&SID_STopLevelBrowser)?;
-    let vista = navegador.QueryActiveShellView()?;
-    let fundo: windows::Win32::System::Com::IDispatch = vista.GetItemObject(SVGIO_BACKGROUND)?;
-    let pasta: IShellFolderViewDual = fundo.cast()?;
-    let shell: IShellDispatch2 = pasta.Application()?.cast()?;
-    shell.ShellExecute(&BSTR::from(exe), &VARIANT::from(args), &vazio, &VARIANT::from("open"), &VARIANT::from(1i32))
 }
 
 pub fn abrir_uri(uri: PCWSTR) {
