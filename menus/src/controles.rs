@@ -53,6 +53,7 @@ static SET_BK_COLOR: Original = AtomicUsize::new(0);
 static SET_DC_BRUSH_COLOR: Original = AtomicUsize::new(0);
 static SET_DC_PEN_COLOR: Original = AtomicUsize::new(0);
 static PAT_BLT: Original = AtomicUsize::new(0);
+static CREATE_PEN: Original = AtomicUsize::new(0);
 static FAIXA_COMPOSICAO: Original = AtomicUsize::new(0);
 static DUI_COR: Original = AtomicUsize::new(0);
 static DUI_FUNDO: Original = AtomicUsize::new(0);
@@ -138,6 +139,7 @@ fn instalar() {
         desviar(gdi32, PCSTR(c"SetDCBrushColor".as_ptr() as _), set_dc_brush_color as *const (), &SET_DC_BRUSH_COLOR);
         desviar(gdi32, PCSTR(c"SetDCPenColor".as_ptr() as _), set_dc_pen_color as *const (), &SET_DC_PEN_COLOR);
         desviar(gdi32, PCSTR(c"PatBlt".as_ptr() as _), pat_blt as *const (), &PAT_BLT);
+        desviar(gdi32, PCSTR(c"CreatePen".as_ptr() as _), create_pen as *const (), &CREATE_PEN);
         // antes de qualquer faixa de opções nascer: ela pergunta pela composição ao montar
         if let Ok(dwm) = LoadLibraryExW(w!("dwmapi.dll"), None, LOAD_LIBRARY_SEARCH_SYSTEM32) {
             desviar(dwm, PCSTR(c"DwmIsCompositionEnabled".as_ptr() as _), faixa_composicao as *const (), &FAIXA_COMPOSICAO);
@@ -581,6 +583,12 @@ unsafe extern "system" fn set_dc_brush_color(dc: HDC, c: COLORREF) -> COLORREF {
         c
     };
     original::<FSetBkColor>(&SET_DC_BRUSH_COLOR)(dc, c)
+}
+
+/// Caneta num desses cinzas (a linha do separador do painel da esquerda do Explorador).
+unsafe extern "system" fn create_pen(estilo: PEN_STYLE, largura: i32, c: COLORREF) -> HPEN {
+    let c = if ligado() { papel_do_cinza(c.0).map_or(c, cor) } else { c };
+    original::<unsafe extern "system" fn(PEN_STYLE, i32, COLORREF) -> HPEN>(&CREATE_PEN)(estilo, largura, c)
 }
 
 type FPatBlt = unsafe extern "system" fn(HDC, i32, i32, i32, i32, ROP_CODE) -> BOOL;
