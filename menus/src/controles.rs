@@ -56,6 +56,7 @@ static PAT_BLT: Original = AtomicUsize::new(0);
 static CREATE_PEN: Original = AtomicUsize::new(0);
 static BIT_BLT: Original = AtomicUsize::new(0);
 static ALPHA_BLEND: Original = AtomicUsize::new(0);
+static DWM_ATRIBUTO: Original = AtomicUsize::new(0);
 static FAIXA_COMPOSICAO: Original = AtomicUsize::new(0);
 static DUI_COR: Original = AtomicUsize::new(0);
 static DUI_FUNDO: Original = AtomicUsize::new(0);
@@ -144,6 +145,9 @@ fn instalar() {
         desviar(gdi32, PCSTR(c"CreatePen".as_ptr() as _), create_pen as *const (), &CREATE_PEN);
         desviar(gdi32, PCSTR(c"BitBlt".as_ptr() as _), bit_blt as *const (), &BIT_BLT);
         desviar(gdi32, PCSTR(c"GdiAlphaBlend".as_ptr() as _), alpha_blend as *const (), &ALPHA_BLEND);
+        if let Ok(dwm) = LoadLibraryExW(w!("dwmapi.dll"), None, LOAD_LIBRARY_SEARCH_SYSTEM32) {
+            desviar(dwm, PCSTR(c"DwmSetWindowAttribute".as_ptr() as _), dwm_atributo as *const (), &DWM_ATRIBUTO);
+        }
         // antes de qualquer faixa de opções nascer: ela pergunta pela composição ao montar
         if let Ok(dwm) = LoadLibraryExW(w!("dwmapi.dll"), None, LOAD_LIBRARY_SEARCH_SYSTEM32) {
             desviar(dwm, PCSTR(c"DwmIsCompositionEnabled".as_ptr() as _), faixa_composicao as *const (), &FAIXA_COMPOSICAO);
@@ -881,6 +885,17 @@ unsafe fn cobrir_ajuda(dc: HDC) {
     if let Some(a) = ajuda_da_faixa(h) {
         preencher_direto(dc, &a, pincel(FUNDO));
     }
+}
+
+/// Menus com cantos retos: o menu de contexto do Explorador pede cantos arredondados depois de
+/// a barra pedir retos, e o arredondamento corta a borda do tema nos cantos.
+unsafe extern "system" fn dwm_atributo(h: HWND, atributo: u32, valor: *const std::ffi::c_void, tamanho: u32) -> HRESULT {
+    let o = original::<unsafe extern "system" fn(HWND, u32, *const std::ffi::c_void, u32) -> HRESULT>(&DWM_ATRIBUTO);
+    if atributo == DWMWA_WINDOW_CORNER_PREFERENCE.0 as u32 && ligado() && classe_da_janela(h, "#32768") {
+        let reto = DWMWCP_DONOTROUND.0 as u32;
+        return o(h, atributo, &reto as *const _ as *const _, 4);
+    }
+    o(h, atributo, valor, tamanho)
 }
 
 unsafe extern "system" fn bit_blt(d: HDC, x: i32, y: i32, w: i32, h: i32, o: HDC, x1: i32, y1: i32, rop: ROP_CODE) -> BOOL {
