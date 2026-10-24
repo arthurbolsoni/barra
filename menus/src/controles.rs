@@ -1047,6 +1047,8 @@ enum Classe {
     Assistente,
     /// Barra de endereço e caixa de busca do Explorador.
     Endereco,
+    /// Menus que o programa desenha pelo tema do Windows (o de contexto do Explorador).
+    Menu,
 }
 
 /// Classe do tema pelo nome (GetThemeClass, ordinal 74 da uxtheme), sem o prefixo
@@ -1091,6 +1093,7 @@ fn classe(t: HTHEME) -> Option<Classe> {
         _ if igual("Spin") => Classe::Giro,
         _ if igual("Toolbar") => Classe::Ferramentas,
         _ if igual("AddressBand") || igual("SearchBox") => Classe::Endereco,
+        _ if igual("Menu") => Classe::Menu,
         _ if igual("Rebar") => Classe::Rebar,
         _ if igual("Status") => Classe::Status,
         _ if igual("Tooltip") => Classe::Dica,
@@ -1199,6 +1202,58 @@ impl Tela {
 fn pintar(c: Classe, t: &Tela, parte: i32, estado: i32) -> bool {
     match c {
         Classe::Botao => botao(t, parte, estado),
+        // Menus: as regras dos menus da barra (DESIGN.md, "Menus")
+        Classe::Menu => match parte {
+            // MENU_BARBACKGROUND, MENU_POPUPBACKGROUND, MENU_POPUPGUTTER, MENU_POPUPCHECKBACKGROUND
+            7 | 9 | 12 | 13 => {
+                t.fundo(FUNDO);
+                true
+            }
+            // MENU_POPUPBORDERS: 2 px em destaque, como a moldura do menu
+            10 => {
+                t.fundo(FUNDO);
+                if !t.sem_borda {
+                    for i in 0..2 {
+                        let r = RECT { left: t.r.left + i, top: t.r.top + i, right: t.r.right - i, bottom: t.r.bottom - i };
+                        Tela { r, ..*t }.borda(DESTAQUE);
+                    }
+                }
+                true
+            }
+            // MENU_BARITEM: sob o mouse e aberto
+            8 => {
+                match estado {
+                    2 => t.fundo(FUNDO_CLARO),
+                    3 => t.fundo(SELECAO),
+                    _ => t.fundo(FUNDO),
+                }
+                true
+            }
+            // MENU_POPUPITEM e MENU_POPUPITEM_FOCUSABLE (o do menu de contexto do Explorador): fundo;
+            // selecionado em selecao (HOT, DISABLEDHOT)
+            14 | 27 => {
+                t.fundo(if matches!(estado, 2 | 4) { SELECAO } else { FUNDO });
+                true
+            }
+            // MENU_POPUPSEPARATOR: linha de 1 px em mudo, recuada 10 px
+            15 => {
+                let r = RECT { left: t.r.left + 10, right: t.r.right - 10, ..t.r };
+                Tela { r, ..*t }.linha(MUDO, true);
+                true
+            }
+            // MENU_POPUPCHECK: marca (ou bolinha) em destaque
+            11 => {
+                let g = if matches!(estado, 3 | 4) { G_CIRCULO_MARCADO } else { G_MARCA };
+                t.glifo(g, if matches!(estado, 2 | 4) { MUDO } else { DESTAQUE }, 0.7);
+                true
+            }
+            // MENU_POPUPSUBMENU: seta em texto-apagado
+            16 => {
+                t.glifo(G_DIREITA, if estado == 2 { MUDO } else { APAGADO }, 0.7);
+                true
+            }
+            _ => false,
+        },
         // ABP_ADDRESSBAND e SBP_SEARCHBOX: a caixa, como a de edição
         Classe::Endereco => match parte {
             1 => {
@@ -1617,6 +1672,11 @@ fn rolagem(t: &Tela, parte: i32, estado: i32) -> bool {
 /// Papel da cor do texto de cada parte.
 fn texto_de(c: Classe, parte: i32, estado: i32) -> usize {
     match c {
+        Classe::Menu => match (parte, estado) {
+            (14 | 27, 3 | 4) | (8, 4..=6) => MUDO,
+            (14 | 27, 2) | (8, 2 | 3) => TEXTO_FORTE,
+            _ => TEXTO,
+        },
         Classe::Botao => match parte {
             1 => match estado { 4 => MUDO, 2 | 3 => TEXTO_FORTE, _ => TEXTO },
             2 if estado == 4 || estado == 8 => MUDO,

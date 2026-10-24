@@ -17,8 +17,9 @@
 //! - controles Win32 (botões, caixas de seleção, abas, listas, campos…) e cores do sistema:
 //!   ver `controles`.
 //!
-//! Menus que o próprio programa desenha (itens owner-draw ou com bitmap de callback, como os do
-//! Explorer) ficam só com o modo escuro. Nada aqui pode entrar em pânico: um pânico dentro de
+//! Menus que o próprio programa desenha (itens owner-draw) ficam só com o modo escuro. Itens com
+//! bitmap de callback (os ícones do menu de contexto do Explorer) são convertidos, e o ícone
+//! continua sendo pedido ao programa. Nada aqui pode entrar em pânico: um pânico dentro de
 //! outro programa derrubaria o programa.
 //!
 //! Cada versão da barra traz uma cópia nova desta DLL, e as antigas continuam presas nos
@@ -355,6 +356,8 @@ struct Item {
     texto: Vec<u16>,
     bitmap: isize,
     submenu: isize,
+    /// dwItemData do programa: vai no pedido do ícone de callback.
+    dados: usize,
 }
 
 struct MenuConvertido {
@@ -390,7 +393,7 @@ unsafe fn converter(menu: HMENU, dono: HWND) {
         let mut texto = [0u16; 512];
         let mut mii = MENUITEMINFOW {
             cbSize: size_of::<MENUITEMINFOW>() as u32,
-            fMask: MIIM_FTYPE | MIIM_ID | MIIM_STRING | MIIM_BITMAP | MIIM_SUBMENU,
+            fMask: MIIM_FTYPE | MIIM_ID | MIIM_STRING | MIIM_BITMAP | MIIM_SUBMENU | MIIM_DATA,
             dwTypeData: windows::core::PWSTR(texto.as_mut_ptr()),
             cch: texto.len() as u32 - 1,
             ..Default::default()
@@ -402,8 +405,9 @@ unsafe fn converter(menu: HMENU, dono: HWND) {
         if !novo && ownerdraw {
             continue; // já convertido por nós
         }
-        // o programa já desenha (ou pede para desenhar) este menu: fica como está
-        if ownerdraw || mii.fType.0 & MFT_BITMAP.0 != 0 || mii.hbmpItem == HBMMENU_CALLBACK {
+        // o programa já desenha este menu: fica como está (o ícone de callback ele desenha quando
+        // pedido, também no item convertido)
+        if ownerdraw || mii.fType.0 & MFT_BITMAP.0 != 0 {
             if novo {
                 return;
             }
@@ -417,6 +421,7 @@ unsafe fn converter(menu: HMENU, dono: HWND) {
             texto: texto[..len].to_vec(),
             bitmap: mii.hbmpItem.0 as isize,
             submenu: mii.hSubMenu.0 as isize,
+            dados: mii.dwItemData,
         });
     }
     for it in &itens[antes..] {
@@ -525,7 +530,7 @@ unsafe extern "system" fn proc_dono(h: HWND, msg: u32, wp: WPARAM, lp: LPARAM, _
         if msg == WM_MEASUREITEM && seguro(false, || medir(h, &mut *(lp.0 as *mut MEASUREITEMSTRUCT))) {
             return LRESULT(1);
         }
-        if msg == WM_DRAWITEM && seguro(false, || desenhar(&*(lp.0 as *const DRAWITEMSTRUCT))) {
+        if msg == WM_DRAWITEM && seguro(false, || desenhar(h, &*(lp.0 as *const DRAWITEMSTRUCT))) {
             return LRESULT(1);
         }
     }
@@ -559,12 +564,12 @@ unsafe fn medir(h: HWND, mi: &mut MEASUREITEMSTRUCT) -> bool {
     true
 }
 
-unsafe fn desenhar(di: &DRAWITEMSTRUCT) -> bool {
+unsafe fn desenhar(dono: HWND, di: &DRAWITEMSTRUCT) -> bool {
     if di.CtlType != ODT_MENU {
         return false;
     }
     let menu = di.hwndItem.0 as isize;
-    let Some((tipo, texto, bitmap, submenu)) = achar(Some(menu), di.itemID, |it| (it.tipo, it.texto.clone(), it.bitmap, it.submenu != 0)) else {
+    let Some((tipo, texto, bitmap, submenu, dados)) = achar(Some(menu), di.itemID, |it| (it.tipo, it.texto.clone(), it.bitmap, it.submenu != 0, it.dados)) else {
         return false;
     };
     let dc = di.hDC;
@@ -597,6 +602,26 @@ unsafe fn desenhar(di: &DRAWITEMSTRUCT) -> bool {
         escrever(dc, &glifo(g), coluna, cor(DESTAQUE), DT_CENTER | DT_NOPREFIX);
     } else if let Some(g) = glifo_de_bitmap(HBITMAP(bitmap as *mut _)) {
         escrever(dc, &glifo(g), coluna, tinta, DT_CENTER | DT_NOPREFIX);
+    } else if bitmap == HBMMENU_CALLBACK.0 as isize {
+        // o ícone é do programa: o mesmo WM_DRAWITEM que o Windows manda para esse bitmap, com o
+        // dwItemData dele, direto ao programa (adiante na cadeia de subclasses)
+        let lado = px(16, dpi);
+        let x = coluna.left + (px(28, dpi) - lado) / 2;
+        let y = r.top + (r.bottom - r.top - lado) / 2;
+        let pedido = DRAWITEMSTRUCT {
+            CtlType: ODT_MENU,
+            itemID: di.itemID,
+            itemAction: windows::Win32::UI::Controls::ODA_DRAWENTIRE,
+            itemState: di.itemState,
+            hwndItem: di.hwndItem,
+            hDC: dc,
+            rcItem: RECT { left: x, top: y, right: x + lado, bottom: y + lado },
+            itemData: dados,
+            ..Default::default()
+        };
+        let salvo = SaveDC(dc);
+        DefSubclassProc(dono, WM_DRAWITEM, WPARAM(0), LPARAM(&pedido as *const _ as isize));
+        _ = RestoreDC(dc, salvo);
     } else if bitmap > 11 {
         let lado = px(16, dpi);
         desenhar_bitmap(dc, HBITMAP(bitmap as *mut _), coluna.left + (px(28, dpi) - lado) / 2, r.top + (r.bottom - r.top - lado) / 2, lado);
