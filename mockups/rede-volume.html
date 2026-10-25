@@ -1,0 +1,337 @@
+<!doctype html>
+<html lang="pt-br">
+<head>
+<meta charset="utf-8">
+<title>barra — rede e volume</title>
+<style>
+  :root {
+    --fundo: #1a1b26; --fundo-claro: #24283b; --selecao: #292e42; --mudo: #414868;
+    --texto: #a9b1d6; --apagado: #7e84a1; --escuro: #565f89; --forte: #c0caf5;
+    --destaque: #7aa2f7; --vermelho: #f7768e; --amarelo: #e0af68; --verde: #9ece6a;
+    --mono: "CaskaydiaMono Nerd Font", "CaskaydiaCove Nerd Font", "Cascadia Mono", monospace;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #0d0e14; color: var(--texto); font: 13px/1.5 var(--mono); padding: 24px 32px 64px; }
+  h1 { color: var(--forte); font-size: 15px; margin: 0 0 4px; }
+  .intro { color: var(--apagado); margin: 0 0 28px; max-width: 900px; }
+  section { margin-bottom: 40px; }
+  h2 { color: var(--forte); font-size: 13px; margin: 0 0 2px; }
+  h2 span { color: var(--destaque); }
+  .nota { color: var(--apagado); margin: 0 0 10px; max-width: 1000px; }
+  .nota kbd { color: var(--amarelo); font: inherit; }
+
+  /* tela simulada */
+  .tela { position: relative; height: 430px; overflow: hidden; border: 1px solid #2a2d3d;
+    background: radial-gradient(ellipse at 30% 120%, #2b3150 0%, #161825 55%, #0f1019 100%); user-select: none; }
+  .janela-fundo { position: absolute; top: 60px; left: 40px; width: 46%; height: 300px; background: #16161e; border: 1px solid #2a2d3d; opacity: .7; }
+  .janela-fundo::before { content: "~ $ cargo run --release"; display: block; padding: 10px 14px; color: var(--escuro); }
+
+  /* barra */
+  .barra { position: absolute; top: 0; left: 0; right: 0; height: 26px; background: var(--fundo);
+    display: flex; align-items: stretch; font-size: 12px; color: var(--texto); z-index: 5; }
+  .barra > * { display: flex; align-items: center; }
+  .grupo { padding: 0 7px; }
+  .grupo.ativo { color: var(--destaque); font-weight: 700; font-size: 14px; }
+  .grupo.vazio { color: var(--apagado); }
+  .sep { color: var(--mudo); padding: 0 4px; }
+  .jan { width: 28px; justify-content: center; font-size: 15px; }
+  .jan.foco { color: var(--forte); background: var(--selecao); }
+  .espaco { flex: 1; }
+  .bandeja { width: 24px; justify-content: center; font-size: 14px; color: var(--apagado); }
+  .sis { width: 24px; justify-content: center; font-size: 14px; cursor: pointer; position: relative; }
+  .sis:hover, .sis.aberto { background: var(--fundo-claro); color: var(--forte); }
+  .sis.mudo { color: var(--vermelho); }
+  .relogio { padding: 0 12px 0 14px; }
+
+  /* 1. painel do Windows (Win+A) */
+  .win { position: absolute; right: 12px; bottom: 12px; width: 360px; padding: 18px 18px 0;
+    background: rgba(44,44,44,.92); backdrop-filter: blur(30px); border: 1px solid rgba(255,255,255,.08);
+    border-radius: 8px; box-shadow: 0 8px 32px rgba(0,0,0,.5); font: 13px "Segoe UI Variable", "Segoe UI", sans-serif; color: #fff; display: none; z-index: 4; }
+  .win.vis { display: block; }
+  .tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px 10px; }
+  .tile { text-align: center; font-size: 12px; }
+  .tile b { display: flex; height: 48px; border-radius: 6px; background: rgba(255,255,255,.08); align-items: center; justify-content: center; font: 18px var(--mono); margin-bottom: 4px; }
+  .tile.on b { background: #4cc2ff; color: #000; }
+  .wslider { display: flex; align-items: center; gap: 12px; margin: 22px 2px 0; }
+  .wslider i { font: normal 16px var(--mono); width: 18px; }
+  .wslider div { flex: 1; height: 4px; background: rgba(255,255,255,.5); border-radius: 2px; position: relative; }
+  .wslider div::before { content: ""; position: absolute; inset: 0 auto 0 0; width: var(--v); background: #4cc2ff; border-radius: 2px; }
+  .wslider div::after { content: ""; position: absolute; left: var(--v); top: 50%; width: 18px; height: 18px; margin: -9px 0 0 -9px; border-radius: 50%; background: #4cc2ff; border: 4px solid #454545; }
+  .wpe { display: flex; justify-content: space-between; margin: 20px -18px 0; padding: 12px 18px; background: rgba(0,0,0,.2); border-radius: 0 0 8px 8px; color: #ccc; }
+  .seta-win { position: absolute; right: 70px; top: 34px; color: var(--amarelo); font-size: 12px; display: none; z-index: 6; }
+  .seta-win.vis { display: block; }
+
+  /* 2. lista nativa de redes (ms-availablenetworks:) */
+  .winrede { width: 360px; }
+  .winrede h3 { margin: 0 0 10px; font-weight: 600; font-size: 14px; }
+  .wnet { display: flex; align-items: center; gap: 12px; padding: 10px; border-radius: 4px; }
+  .wnet.con { background: rgba(255,255,255,.06); }
+  .wnet i { font: normal 16px var(--mono); }
+  .wnet small { display: block; color: #aaa; }
+  .wnet .btn { margin-left: auto; padding: 4px 14px; border-radius: 4px; background: rgba(255,255,255,.08); font-size: 12px; }
+
+  /* OSD de volume (proposta da roda) */
+  .osd { position: absolute; top: 26px; transform: translateX(-50%); background: var(--fundo); border: 1px solid var(--mudo);
+    padding: 4px 10px; font-size: 12px; white-space: nowrap; display: none; z-index: 6; }
+  .osd.vis { display: block; }
+  .osd .trilho { display: inline-block; width: 100px; height: 6px; background: var(--mudo); vertical-align: middle; margin: 0 8px; position: relative; }
+  .osd .trilho::before { content: ""; position: absolute; inset: 0 auto 0 0; width: var(--v); background: var(--destaque); }
+  .osd.mudo .trilho::before { background: var(--escuro); }
+  .osd.mudo { color: var(--vermelho); }
+
+  /* 3. painel próprio */
+  .painel { position: absolute; top: 26px; width: 300px; background: var(--fundo); border: 1px solid var(--mudo);
+    border-top: 0; font-size: 12px; display: none; z-index: 6; box-shadow: 0 8px 24px rgba(0,0,0,.45); }
+  .painel.vis { display: block; }
+  .ptit { display: flex; justify-content: space-between; padding: 8px 12px 6px; color: var(--forte); font-weight: 700; }
+  .ptit span { color: var(--apagado); font-weight: 400; }
+  .linha-vol { display: flex; align-items: center; gap: 10px; padding: 4px 12px 10px; }
+  .linha-vol .ic { font-size: 15px; width: 18px; cursor: pointer; }
+  .linha-vol .ic.mudo { color: var(--vermelho); }
+  .trilho2 { flex: 1; height: 6px; background: var(--mudo); position: relative; cursor: pointer; }
+  .trilho2 i { position: absolute; inset: 0 auto 0 0; width: var(--v); background: var(--destaque); }
+  .trilho2.mudo i { background: var(--escuro); }
+  .num { width: 34px; text-align: right; color: var(--forte); }
+  .rotulo { color: var(--escuro); padding: 6px 12px 2px; border-top: 1px solid var(--selecao); }
+  .item { display: flex; align-items: center; gap: 10px; height: 26px; padding: 0 12px; cursor: pointer; }
+  .item:hover { background: var(--fundo-claro); }
+  .item .ic { width: 18px; font-size: 14px; color: var(--apagado); }
+  .item .marca { margin-left: auto; color: var(--destaque); }
+  .item.sel { color: var(--forte); }
+  .item.sel .ic { color: var(--destaque); }
+  .item .sinal { margin-left: auto; color: var(--apagado); }
+  .item .cad { color: var(--escuro); width: 14px; }
+  .item.ext { color: var(--apagado); border-top: 1px solid var(--selecao); }
+  .item.ext .ic { color: var(--escuro); }
+  .app { display: flex; align-items: center; gap: 10px; padding: 3px 12px; }
+  .app .nome { width: 70px; color: var(--apagado); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .app .trilho2 { height: 4px; }
+  .chave { margin-left: auto; width: 26px; height: 12px; background: var(--destaque); position: relative; }
+  .chave::after { content: ""; position: absolute; right: 2px; top: 2px; width: 8px; height: 8px; background: var(--fundo); }
+  .conectando { color: var(--amarelo); margin-left: auto; }
+</style>
+</head>
+<body>
+
+<h1>Rede e volume — propostas</h1>
+<p class="intro">Cada quadro é a tela com a barra no topo. Clique nos ícones de Wi-Fi (󰖩) e volume (󰕾) no canto direito da barra. Nos quadros 2 e 3, a roda do mouse sobre o volume muda o nível e o clique do meio liga e desliga o mudo.</p>
+
+<!-- ===================== ATUAL ===================== -->
+<section data-cena="atual">
+  <h2><span>0.</span> Como é hoje</h2>
+  <p class="nota">Rede e volume abrem o mesmo painel do Win+A (<kbd>ms-actioncenter:controlcenter</kbd>). O Windows desenha esse painel no canto inferior direito, onde ficaria a barra dele, longe do ícone clicado e no estilo Fluent.</p>
+  <div class="tela">
+    <div class="barra"></div>
+    <div class="janela-fundo"></div>
+    <div class="seta-win">↓ abre lá embaixo</div>
+    <div class="win" data-p="qs">
+      <div class="tiles">
+        <div class="tile on"><b>󰖩</b>Rede_5G</div>
+        <div class="tile on"><b>󰂯</b>Bluetooth</div>
+        <div class="tile"><b>󰀝</b>Modo avião</div>
+        <div class="tile"><b>󰌪</b>Economia</div>
+        <div class="tile"><b>󰖔</b>Luz noturna</div>
+        <div class="tile"><b>󰖂</b>VPN</div>
+      </div>
+      <div class="wslider"><i>󰃠</i><div style="--v:70%"></div></div>
+      <div class="wslider"><i>󰕾</i><div style="--v:45%"></div><i>󰒓</i></div>
+      <div class="wpe"><span>󰁹 100%</span><span>󰒓</span></div>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== 1 ===================== -->
+<section data-cena="nativo">
+  <h2><span>1.</span> Painéis nativos separados</h2>
+  <p class="nota">O Wi-Fi abre a lista de redes do Windows (<kbd>ms-availablenetworks:</kbd>) e o volume abre o mixer nas Configurações (<kbd>ms-settings:apps-volume</kbd>). Cada ícone abre o painel dele, mas continua sendo o Windows: posição embaixo e visual Fluent. O mixer abre a janela inteira das Configurações.</p>
+  <div class="tela">
+    <div class="barra"></div>
+    <div class="janela-fundo"></div>
+    <div class="win winrede" data-p="wifi">
+      <h3>Wi-Fi</h3>
+      <div class="wnet con"><i>󰤨</i><div>Rede_5G<small>Conectado, protegido</small></div><span class="btn">Desconectar</span></div>
+      <div class="wnet"><i>󰤥</i><div>Rede_Visitante<small>Protegido</small></div></div>
+      <div class="wnet"><i>󰤢</i><div>Rede_2G<small>Protegido</small></div></div>
+      <div class="wnet"><i>󰤟</i><div>Rede_Aberta<small>Aberto</small></div></div>
+      <div class="wpe"><span>Mais configurações de Wi-Fi</span><span>󰒓</span></div>
+    </div>
+    <div class="win" data-p="vol" style="width:520px;height:330px;bottom:12px;right:auto;left:30%;border-radius:8px;padding:0">
+      <div style="padding:10px 16px;font-size:12px;color:#ccc;border-bottom:1px solid rgba(255,255,255,.06)">Configurações</div>
+      <div style="padding:16px 22px">
+        <div style="font-size:22px;font-weight:600;margin-bottom:14px">Sistema › Som › Mixer de volume</div>
+        <div style="color:#ccc;margin-bottom:6px">Sistema</div>
+        <div class="wslider" style="margin:0 0 18px"><i>󰕾</i><div style="--v:45%"></div></div>
+        <div style="color:#ccc;margin-bottom:6px">Aplicativos</div>
+        <div class="wslider" style="margin:6px 0"><i>󰊯</i><div style="--v:80%"></div></div>
+        <div class="wslider" style="margin:14px 0"><i>󰙯</i><div style="--v:60%"></div></div>
+        <div class="wslider" style="margin:14px 0"><i>󰓇</i><div style="--v:35%"></div></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== 2 ===================== -->
+<section data-cena="roda">
+  <h2><span>2.</span> Roda do mouse no volume</h2>
+  <p class="nota">Sem painel: a roda sobre o ícone sobe ou desce 2% (Core Audio), e o clique do meio liga e desliga o mudo. Um indicador pequeno aparece embaixo do ícone e some depois de 1,2 s. O ícone segue o nível (󰕿 󰖀 󰕾) e fica vermelho no mudo. O clique esquerdo continua abrindo o que estiver definido (painel do Windows ou o painel próprio da proposta 3).</p>
+  <div class="tela">
+    <div class="barra"></div>
+    <div class="janela-fundo"></div>
+    <div class="osd"><span class="ic">󰕾</span><span class="trilho"></span><span class="num">45%</span></div>
+  </div>
+</section>
+
+<!-- ===================== 3 ===================== -->
+<section data-cena="proprio">
+  <h2><span>3.</span> Painel próprio, preso ao ícone</h2>
+  <p class="nota">Desenhado pela barra em Direct2D, com o tema e a fonte dela, saindo logo embaixo do ícone clicado. O volume tem o nível geral, a saída (fone, caixa, monitor) e o volume por programa. O Wi-Fi lista as redes com o sinal; as redes salvas ou abertas conectam ali mesmo, e o resto vai para a lista nativa no último item. Esc ou clique fora fecha.</p>
+  <div class="tela">
+    <div class="barra"></div>
+    <div class="janela-fundo"></div>
+
+    <div class="painel" data-p="vol">
+      <div class="ptit">Volume <span class="pnum">45%</span></div>
+      <div class="linha-vol"><span class="ic geral">󰕾</span><div class="trilho2 geral"><i></i></div><span class="num pnum">45%</span></div>
+      <div class="rotulo">saída</div>
+      <div class="item sel saida"><span class="ic">󰋋</span>Fone de ouvido<span class="marca">󰄬</span></div>
+      <div class="item saida"><span class="ic">󰓃</span>Alto-falantes<span class="marca"></span></div>
+      <div class="item saida"><span class="ic">󰍹</span>Monitor (HDMI)<span class="marca"></span></div>
+      <div class="rotulo">programas</div>
+      <div class="app"><span class="ic">󰊯</span><span class="nome">Chrome</span><div class="trilho2" style="--v:80%"><i></i></div></div>
+      <div class="app"><span class="ic">󰙯</span><span class="nome">Discord</span><div class="trilho2" style="--v:60%"><i></i></div></div>
+      <div class="app" style="padding-bottom:8px"><span class="ic">󰓇</span><span class="nome">Spotify</span><div class="trilho2" style="--v:35%"><i></i></div></div>
+      <div class="item ext"><span class="ic">󰒓</span>Configurações de som</div>
+    </div>
+
+    <div class="painel" data-p="wifi">
+      <div class="ptit">Wi-Fi <span class="chave"></span></div>
+      <div class="item sel rede"><span class="ic">󰤨</span>Rede_5G<span class="cad">󰌾</span><span class="marca">conectado</span></div>
+      <div class="rotulo">disponíveis</div>
+      <div class="item rede"><span class="ic">󰤥</span>Rede_Visitante<span class="sinal"><span class="cad">󰌾</span></span></div>
+      <div class="item rede"><span class="ic">󰤢</span>Rede_Trabalho<span class="sinal">salva <span class="cad">󰌾</span></span></div>
+      <div class="item rede"><span class="ic">󰤢</span>Rede_2G<span class="sinal"><span class="cad">󰌾</span></span></div>
+      <div class="item rede"><span class="ic">󰤟</span>Rede_Aberta<span class="sinal">aberta</span></div>
+      <div class="item ext"><span class="ic">󰖩</span>Outra rede ou senha nova…</div>
+      <div class="item ext" style="border-top:0"><span class="ic">󰒓</span>Configurações de rede</div>
+    </div>
+  </div>
+</section>
+
+<script>
+const BARRA = `
+  <span class="grupo">1</span><span class="grupo ativo">󱓻</span><span class="grupo">3</span><span class="grupo vazio">4</span>
+  <span class="sep">|</span>
+  <span class="jan foco">&#xf120;</span><span class="jan">&#xf120;</span><span class="jan">&#xf0a1e;</span><span class="jan">&#xf268;</span><span class="jan">󰭹</span>
+  <span class="espaco"></span>
+  <span class="bandeja">󰒓</span><span class="bandeja">󰙯</span><span class="bandeja">󰓇</span>
+  <span class="sep">|</span>
+  <span class="sis" data-s="wifi" title="Rede_5G">󰖩</span><span class="sis" data-s="vol" title="Volume">󰕾</span>
+  <span class="relogio">qui 22 out 14:32</span>`;
+
+const glifoVol = (v, m) => m ? "󰖁" : v === 0 ? "󰕿" : v < 34 ? "󰕿" : v < 67 ? "󰖀" : "󰕾";
+
+document.querySelectorAll("section").forEach(sec => {
+  const cena = sec.dataset.cena, tela = sec.querySelector(".tela");
+  tela.querySelector(".barra").innerHTML = BARRA;
+  const sis = s => tela.querySelector(`.sis[data-s="${s}"]`);
+  const painel = p => tela.querySelector(`[data-p="${p}"]`);
+  let vol = 45, mudo = false, timer;
+
+  const fechar = () => {
+    tela.querySelectorAll("[data-p]").forEach(p => p.classList.remove("vis"));
+    tela.querySelectorAll(".sis").forEach(s => s.classList.remove("aberto"));
+    tela.querySelector(".seta-win")?.classList.remove("vis");
+  };
+  const posicionar = (el, ancora) => {
+    const r = ancora.getBoundingClientRect(), t = tela.getBoundingClientRect();
+    const x = r.left - t.left + r.width / 2;
+    if (el.classList.contains("osd")) el.style.left = x + "px";
+    else el.style.left = Math.min(t.width - el.offsetWidth - 1, x - 12) + "px";
+  };
+  const pintarVol = () => {
+    sis("vol").textContent = glifoVol(vol, mudo);
+    sis("vol").classList.toggle("mudo", mudo);
+    tela.querySelectorAll(".pnum").forEach(n => n.textContent = mudo ? "mudo" : vol + "%");
+    const g = tela.querySelector(".ic.geral"), tr = tela.querySelector(".trilho2.geral");
+    if (g) { g.textContent = glifoVol(vol, mudo); g.classList.toggle("mudo", mudo); }
+    if (tr) { tr.style.setProperty("--v", vol + "%"); tr.classList.toggle("mudo", mudo); }
+    const osd = tela.querySelector(".osd");
+    if (osd) {
+      osd.querySelector(".ic").textContent = glifoVol(vol, mudo);
+      osd.querySelector(".trilho").style.setProperty("--v", vol + "%");
+      osd.querySelector(".num").textContent = mudo ? "mudo" : vol + "%";
+      osd.classList.toggle("mudo", mudo);
+    }
+  };
+  const mostrarOsd = () => {
+    const osd = tela.querySelector(".osd");
+    if (!osd) return;
+    osd.classList.add("vis"); posicionar(osd, sis("vol"));
+    clearTimeout(timer); timer = setTimeout(() => osd.classList.remove("vis"), 1200);
+  };
+
+  tela.querySelectorAll(".sis").forEach(s => s.addEventListener("click", e => {
+    e.stopPropagation();
+    const alvo = s.dataset.s;
+    const p = cena === "atual" ? painel("qs") : painel(alvo);
+    const jaAberto = s.classList.contains("aberto");
+    fechar();
+    if (!p || jaAberto) return;
+    s.classList.add("aberto"); p.classList.add("vis");
+    if (cena === "atual") tela.querySelector(".seta-win").classList.add("vis");
+    if (cena === "proprio") posicionar(p, s);
+  }));
+
+  if (cena === "roda" || cena === "proprio") {
+    sis("vol").addEventListener("wheel", e => {
+      e.preventDefault();
+      vol = Math.max(0, Math.min(100, vol + (e.deltaY < 0 ? 2 : -2)));
+      mudo = false; pintarVol();
+      if (!painel("vol")?.classList.contains("vis")) mostrarOsd();
+    }, { passive: false });
+    sis("vol").addEventListener("mousedown", e => {
+      if (e.button !== 1) return;
+      e.preventDefault(); mudo = !mudo; pintarVol();
+      if (!painel("vol")?.classList.contains("vis")) mostrarOsd();
+    });
+  }
+
+  if (cena === "proprio") {
+    const pv = painel("vol");
+    pv.addEventListener("click", e => e.stopPropagation());
+    painel("wifi").addEventListener("click", e => e.stopPropagation());
+    pv.querySelector(".ic.geral").addEventListener("click", () => { mudo = !mudo; pintarVol(); });
+    pv.querySelector(".trilho2.geral").addEventListener("click", e => {
+      const r = e.currentTarget.getBoundingClientRect();
+      vol = Math.round((e.clientX - r.left) / r.width * 100); mudo = false; pintarVol();
+    });
+    pv.addEventListener("wheel", e => {
+      e.preventDefault();
+      vol = Math.max(0, Math.min(100, vol + (e.deltaY < 0 ? 2 : -2))); mudo = false; pintarVol();
+    }, { passive: false });
+    pv.querySelectorAll(".saida").forEach(it => it.addEventListener("click", () => {
+      pv.querySelectorAll(".saida").forEach(o => { o.classList.remove("sel"); o.querySelector(".marca").textContent = ""; });
+      it.classList.add("sel"); it.querySelector(".marca").textContent = "󰄬";
+    }));
+    painel("wifi").querySelectorAll(".rede:not(.sel)").forEach(it => it.addEventListener("click", () => {
+      const s = it.querySelector(".sinal");
+      if (!/salva|aberta/.test(s.textContent)) { s.innerHTML = '<span style="color:var(--amarelo)">pede senha → lista nativa</span>'; return; }
+      s.innerHTML = '<span class="conectando">conectando…</span>';
+      setTimeout(() => {
+        const atual = painel("wifi").querySelector(".rede.sel");
+        atual.classList.remove("sel"); atual.querySelector(".marca").remove();
+        atual.insertAdjacentHTML("beforeend", '<span class="sinal">salva <span class="cad">󰌾</span></span>');
+        it.classList.add("sel"); s.remove();
+        it.insertAdjacentHTML("beforeend", '<span class="marca">conectado</span>');
+        sis("wifi").title = it.textContent.trim();
+      }, 900);
+    }));
+  }
+
+  tela.addEventListener("click", fechar);
+  document.addEventListener("keydown", e => e.key === "Escape" && fechar());
+  pintarVol();
+});
+</script>
+</body>
+</html>
